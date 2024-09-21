@@ -14,8 +14,12 @@ highest_versions=()
 for major in $highest_two_majors; do
   highest_version=$(echo "$versions" | grep "^$major\." | sort -Vr | head -n 1)
   highest_versions+=("$highest_version")
+  echo "$highest_version"
 done
 
+
+
+<<'COMMENT'
 # Construct the SQL query string with the highest versions
 sql_query="SELECT 1 FROM os_version WHERE version >= '${highest_versions[0]}' OR version >= '${highest_versions[1]}';"
 
@@ -27,3 +31,4 @@ sed -i.bak "s|^query:.*|query: \"$sql_query\"|" "$yml_file"
 
 # Output a success message
 echo "The query in the YAML file has been updated successfully."
+COMMENT
