@@ -24,7 +24,7 @@ VERSION=$(jq -r --arg APP_NAME "$APP_NAME" '.[] | select(.token == $APP_NAME or 
 
 # Check if a version was found
 if [ -n "$VERSION" ]; then
-    echo "The version of $APP_NAME is $VERSION."
+    echo "The latest version of $APP_NAME is $VERSION."
 else
     echo "App $APP_NAME not found."
 fi
