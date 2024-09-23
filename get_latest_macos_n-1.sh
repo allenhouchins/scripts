@@ -16,19 +16,3 @@ for major in $highest_two_majors; do
   highest_versions+=("$highest_version")
   echo "$highest_version"
 done
-
-
-
-<<'COMMENT'
-# Construct the SQL query string with the highest versions
-sql_query="SELECT 1 FROM os_version WHERE version >= '${highest_versions[0]}' OR version >= '${highest_versions[1]}';"
-
-# Path to the YAML file
-yml_file="../lib/operating-system-up-to-date-macos.yml"
-
-# Use sed to replace the line that starts with 'query:' with the new SQL query
-sed -i.bak "s|^query:.*|query: \"$sql_query\"|" "$yml_file"
-
-# Output a success message
-echo "The query in the YAML file has been updated successfully."
-COMMENT
