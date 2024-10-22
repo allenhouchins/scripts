@@ -1,15 +1,7 @@
 #!/bin/bash
 
-# Configuration
-OKTA_DOMAIN="https://okta-dev-09740072-admin.okta.com"
-API_TOKEN="00WOmzN3giooFU5N_HROJrtg3odOAFZYm29rKkaI11"
-USER_ID="00ukjcffn4usjTCsF5d7"
 
-# Function to fetch user information
-get_user_info() {
-  local username="$1"
-  curl -s -L "$OKTA_DOMAIN/api/v1/users/$username" -H "Authorization: SSWS $API_TOKEN" -H "Accept: application/json"
-}
+
 
 # Function to create a plist file
 create_plist() {
@@ -58,7 +50,7 @@ EOF
 }
 
 # Main script
-read -p "Enter Okta ID: " username
+read -p "Enter the Okta ID: " username
 
 # Fetch user info from Okta
 user_info=$(get_user_info "$username")
