@@ -1,8 +1,6 @@
 #!/bin/bash
 # This script runs one last recon, updates the JSS API to show the machine is unmanaged, and then creates a launchd to remove the jamf framework.
 
-# TODO: define minimumim required permissions on API account
-
 # Define variables
 apiUsername="apiusername"
 apiPassword="password"
@@ -40,8 +38,6 @@ UpdateAPI (){
 # This is done so that the script can return a result to the JSS before the framework is removed
 
 
-# TODO: Create plist file with permissions first to close security vector
-
 CreateLaunchd (){
     echo "<?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -66,7 +62,6 @@ CreateLaunchd (){
     chown root:wheel /private/tmp/removetools.plist
     chmod 644 /private/tmp/removetools.plist 
 
-# TODO: change to bootstrap
 
     /bin/launchctl load /private/tmp/removetools.plist
 }
