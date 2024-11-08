@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # This script runs one last recon and then removes the jamf binary. This should be distributed by any means other than Jamf Pro and must be run as root.
 
 # Identify the location of the jamf binary for the jamf_binary variable.
