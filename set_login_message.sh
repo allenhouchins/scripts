@@ -2,7 +2,6 @@
 
 # =============================================================================
 # LOCK SCREEN MESSAGE MANAGER
-# Improved version with better shutdown detection and fixed issues
 # =============================================================================
 
 # Configuration
