@@ -5,7 +5,7 @@ A collection of scripts that you should probably test at least 343 times before 
 
 ## macOS Management Scripts
 
-**set_login_message.sh**
+**set-lock-screen-message.sh**
 > Advanced lock screen message manager for macOS that automatically sets custom lock screen messages with emojis after user login and clears them before shutdown/restart. Supports MDM deployment during Setup Assistant and normal operation. Features include event-driven shutdown detection, comprehensive logging, and zero resource usage when idle.
 
 **google_chrome_macos_policy_updater.sh**
@@ -39,37 +39,3 @@ A collection of scripts that you should probably test at least 343 times before 
 
 **get_latest_macos_n-1.sh**
 > Retrieves the latest available version for macOS (n-1).
-
-<hr>
-
-## Usage Examples
-
-### Lock Screen Message Manager
-```bash
-# Install (default behavior)
-sudo ./set_login_message.sh
-
-# Check status
-./set_login_message.sh status
-
-# Set message immediately
-sudo ./set_login_message.sh set
-
-# Clear message immediately
-sudo ./set_login_message.sh clear
-
-# Uninstall
-sudo ./set_login_message.sh uninstall
-```
-
-### Package Management
-```bash
-# Get latest Chrome version
-./get_latest_google_chrome_for_macos.sh
-
-# Find all homebrew casks
-./find_casks_all.sh
-
-# Get app version
-./get_app_version.sh <app_name>
-```
