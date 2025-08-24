@@ -197,8 +197,8 @@ EOF
     <array>
         <string>$SCRIPT_DIR/set_message_silent.sh</string>
     </array>
-    <key>StartInterval</key>
-    <integer>60</integer>
+    <key>RunAtLoad</key>
+    <true/>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_set.log</string>
     <key>StandardErrorPath</key>
@@ -258,8 +258,8 @@ EOF
     <array>
         <string>$SCRIPT_DIR/set_message_silent.sh</string>
     </array>
-    <key>StartInterval</key>
-    <integer>60</integer>
+    <key>RunAtLoad</key>
+    <true/>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_set.log</string>
     <key>StandardErrorPath</key>
@@ -507,7 +507,7 @@ EOF
         echo "   • Create a LaunchAgent for the new user"
         echo "   • Clear the message before shutdown/restart"
     else
-        echo "   • Keep the message set (refreshed every 60 seconds)"
+        echo "   • Set the message once per login session"
         echo "   • Clear the message before shutdown/restart"
     fi
     echo ""
