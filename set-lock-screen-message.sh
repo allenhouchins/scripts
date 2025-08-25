@@ -261,7 +261,7 @@ EOF
         fi
         chmod +x "$SCRIPT_DIR/set_message_silent.sh"
 
-        # Create LaunchDaemon for setting message (runs as root, no user notification)
+        # Create LaunchDaemon for setting message with delay to ensure user session is ready
         tee /Library/LaunchDaemons/com.lockscreen.setmessage.plist > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -271,7 +271,9 @@ EOF
     <string>com.lockscreen.setmessage</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$SCRIPT_DIR/set_message_silent.sh</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>sleep 10 && defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" && echo "\$(date): Lock screen message set via LaunchDaemon" >> "$USER_HOME/Library/Logs/lockscreen_manager.log"</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -339,7 +341,7 @@ echo "\$(date): Lock screen message set via LaunchDaemon" >> "$USER_HOME/Library
 EOF
         sudo chmod +x "$SCRIPT_DIR/set_message_silent.sh"
 
-        # Create LaunchDaemon for setting message (runs as root, no user notification)
+        # Create LaunchDaemon for setting message with delay to ensure user session is ready
         sudo tee /Library/LaunchDaemons/com.lockscreen.setmessage.plist > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -349,7 +351,9 @@ EOF
     <string>com.lockscreen.setmessage</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$SCRIPT_DIR/set_message_silent.sh</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>sleep 10 && defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" && echo "\$(date): Lock screen message set via LaunchDaemon" >> "$USER_HOME/Library/Logs/lockscreen_manager.log"</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
