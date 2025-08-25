@@ -67,9 +67,9 @@ clear_lock_message() {
 install_lockscreen_manager() {
     echo "Installing Lock Screen Message Manager..."
 
-    # Detect if running as root (MDM deployment)
+    # Detect if running as root
     if [[ $EUID -eq 0 ]]; then
-        echo "Running as root (MDM deployment detected)"
+        echo "Running as root"
         
         # Get the currently logged in user
         LOGGED_IN_USER=$(stat -f%Su /dev/console 2>/dev/null || echo "")
@@ -521,9 +521,9 @@ EOF
 uninstall_lockscreen_manager() {
     echo "Uninstalling Lock Screen Message Manager..."
 
-    # Detect if running as root (MDM deployment)
+    # Detect if running as root
     if [[ $EUID -eq 0 ]]; then
-        echo "Running as root (MDM deployment detected)"
+        echo "Running as root"
         
         # Get the currently logged in user
         LOGGED_IN_USER=$(stat -f%Su /dev/console 2>/dev/null || echo "")
@@ -585,9 +585,9 @@ show_status() {
     echo "Lock Screen Message Manager Status"
     echo "=================================="
     
-    # Detect if running as root (MDM deployment)
+    # Detect if running as root
     if [[ $EUID -eq 0 ]]; then
-        echo "Running as root (MDM deployment detected)"
+        echo "Running as root"
         
         # Get the currently logged in user
         LOGGED_IN_USER=$(stat -f%Su /dev/console 2>/dev/null || echo "")
