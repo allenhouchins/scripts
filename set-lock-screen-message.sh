@@ -66,6 +66,48 @@ clear_lock_message() {
 
 install_lockscreen_manager() {
     echo "Installing Lock Screen Message Manager..."
+    echo "Performing clean installation..."
+
+    # Clean up any existing installation first
+    echo "Cleaning up existing installation..."
+    
+    # Unload existing LaunchDaemons
+    if [[ $EUID -eq 0 ]]; then
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null || true
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null || true
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setupassistant.plist 2>/dev/null || true
+    else
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null || true
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null || true
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setupassistant.plist 2>/dev/null || true
+    fi
+
+    # Remove existing LaunchDaemon files
+    if [[ $EUID -eq 0 ]]; then
+        rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
+        rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
+        rm -f /Library/LaunchDaemons/com.lockscreen.setupassistant.plist
+    else
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.setupassistant.plist
+    fi
+
+    # Remove existing script directory
+    if [[ $EUID -eq 0 ]]; then
+        rm -rf "$SCRIPT_DIR"
+    else
+        sudo rm -rf "$SCRIPT_DIR"
+    fi
+
+    # Clear any existing lock screen message
+    if [[ $EUID -eq 0 ]]; then
+        defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || true
+    else
+        sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || true
+    fi
+
+    echo "Cleanup completed. Starting fresh installation..."
 
     # Detect if running as root
     if [[ $EUID -eq 0 ]]; then
@@ -119,13 +161,15 @@ LOG_FILE="/var/log/lockscreen_manager.log"
 # Ensure log directory exists
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
-# Check if this was triggered by a shutdown event
+# Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+elif [[ "\$1" == "startup" ]]; then
+    TRIGGER="startup event"
 else
     TRIGGER="manual clear"
 fi
@@ -146,13 +190,15 @@ LOG_FILE="$USER_HOME/Library/Logs/lockscreen_manager.log"
 # Ensure log directory exists
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
-# Check if this was triggered by a shutdown event
+# Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+elif [[ "\$1" == "startup" ]]; then
+    TRIGGER="startup event"
 else
     TRIGGER="manual clear"
 fi
@@ -221,13 +267,15 @@ LOG_FILE="$USER_HOME/Library/Logs/lockscreen_manager.log"
 # Ensure log directory exists
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
-# Check if this was triggered by a shutdown event
+# Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+elif [[ "\$1" == "startup" ]]; then
+    TRIGGER="startup event"
 else
     TRIGGER="manual clear"
 fi
@@ -293,7 +341,7 @@ if [[ -n "\$FIRST_USER" ]] && [[ "\$FIRST_USER" != "root" ]]; then
     mkdir -p "\$LAUNCH_AGENTS_DIR"
     chown -R "\$FIRST_USER" "\$LAUNCH_AGENTS_DIR"
     
-    # Create LaunchAgent for the new user that will set message on first login
+    # Create LaunchAgent for the new user that will set message after successful login
     tee "\$LAUNCH_AGENTS_DIR/com.lockscreen.setmessage.plist" > /dev/null << 'LAUNCHAGENT_EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -364,7 +412,7 @@ EOF
         chmod 644 /Library/LaunchDaemons/com.lockscreen.setupassistant.plist
     fi
 
-    # Create LaunchDaemon for shutdown detection using multiple methods
+    # Create LaunchDaemon for shutdown detection and startup clearing
     if [[ $EUID -eq 0 ]]; then
         # Running as root, use tee directly
         tee /Library/LaunchDaemons/com.lockscreen.clearmessage.plist > /dev/null << EOF
@@ -377,7 +425,10 @@ EOF
     <key>ProgramArguments</key>
     <array>
         <string>$SCRIPT_DIR/clear_message.sh</string>
+        <string>startup</string>
     </array>
+    <key>RunAtLoad</key>
+    <true/>
     <key>WatchPaths</key>
     <array>
         <string>/private/var/run/com.apple.shutdown.started</string>
@@ -415,7 +466,10 @@ EOF
     <key>ProgramArguments</key>
     <array>
         <string>$SCRIPT_DIR/clear_message.sh</string>
+        <string>startup</string>
     </array>
+    <key>RunAtLoad</key>
+    <true/>
     <key>WatchPaths</key>
     <array>
         <string>/private/var/run/com.apple.shutdown.started</string>
@@ -539,6 +593,75 @@ EOF
     fi
     echo ""
     echo "💡 Test immediately with: $0 set"
+
+    # Validate installation for MDM deployment
+    echo ""
+    echo "🔍 Validating installation..."
+    VALIDATION_ERRORS=0
+
+    # Check if LaunchDaemon files exist
+    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.setmessage.plist" ]]; then
+        echo "❌ Error: Set message LaunchDaemon file missing"
+        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+    fi
+
+    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.clearmessage.plist" ]]; then
+        echo "❌ Error: Clear message LaunchDaemon file missing"
+        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+    fi
+
+    # Check if script directory exists
+    if [[ ! -d "$SCRIPT_DIR" ]]; then
+        echo "❌ Error: Script directory missing"
+        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+    fi
+
+    # Check if scripts are executable
+    if [[ ! -x "$SCRIPT_DIR/clear_message.sh" ]]; then
+        echo "❌ Error: Clear message script not executable"
+        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+    fi
+
+    if [[ ! -x "$SCRIPT_DIR/set_message_silent.sh" ]]; then
+        echo "❌ Error: Set message script not executable"
+        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+    fi
+
+    # Check if LaunchDaemons are loaded (different contexts for root vs user)
+    if [[ $EUID -eq 0 ]]; then
+        # Running as root - check system context
+        if ! launchctl list | grep -q "com.lockscreen.setmessage"; then
+            echo "❌ Error: Set message LaunchDaemon not loaded"
+            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        if ! launchctl list | grep -q "com.lockscreen.clearmessage"; then
+            echo "❌ Error: Clear message LaunchDaemon not loaded"
+            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+    else
+        # Running as regular user - check system context with sudo
+        if ! sudo launchctl list | grep -q "com.lockscreen.setmessage"; then
+            echo "❌ Error: Set message LaunchDaemon not loaded"
+            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+
+        if ! sudo launchctl list | grep -q "com.lockscreen.clearmessage"; then
+            echo "❌ Error: Clear message LaunchDaemon not loaded"
+            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
+        fi
+    fi
+
+    # Final validation result
+    if [[ $VALIDATION_ERRORS -eq 0 ]]; then
+        echo "✅ Installation validation successful"
+        echo "🚀 Ready for MDM deployment"
+        exit 0
+    else
+        echo "❌ Installation validation failed ($VALIDATION_ERRORS errors)"
+        echo "🔧 Please check the installation and try again"
+        exit 1
+    fi
 }
 
 # =============================================================================
