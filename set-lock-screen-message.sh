@@ -120,9 +120,12 @@ LOG_FILE="/var/log/lockscreen_manager.log"
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
-if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]]; then
-    TRIGGER="shutdown/reboot event"
+if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
+    TRIGGER="shutdown event"
+elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
+    TRIGGER="reboot event"
+elif [[ -n "\$LAUNCH_EVENT" ]]; then
+    TRIGGER="system event (\$LAUNCH_EVENT)"
 else
     TRIGGER="manual clear"
 fi
@@ -144,9 +147,12 @@ LOG_FILE="$USER_HOME/Library/Logs/lockscreen_manager.log"
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
-if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]]; then
-    TRIGGER="shutdown/reboot event"
+if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
+    TRIGGER="shutdown event"
+elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
+    TRIGGER="reboot event"
+elif [[ -n "\$LAUNCH_EVENT" ]]; then
+    TRIGGER="system event (\$LAUNCH_EVENT)"
 else
     TRIGGER="manual clear"
 fi
@@ -216,9 +222,12 @@ LOG_FILE="$USER_HOME/Library/Logs/lockscreen_manager.log"
 mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
-if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]]; then
-    TRIGGER="shutdown/reboot event"
+if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
+    TRIGGER="shutdown event"
+elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
+    TRIGGER="reboot event"
+elif [[ -n "\$LAUNCH_EVENT" ]]; then
+    TRIGGER="system event (\$LAUNCH_EVENT)"
 else
     TRIGGER="manual clear"
 fi
@@ -355,7 +364,7 @@ EOF
         chmod 644 /Library/LaunchDaemons/com.lockscreen.setupassistant.plist
     fi
 
-    # Create LaunchDaemon for shutdown detection using WatchPaths (event-driven)
+    # Create LaunchDaemon for shutdown detection using multiple methods
     if [[ $EUID -eq 0 ]]; then
         # Running as root, use tee directly
         tee /Library/LaunchDaemons/com.lockscreen.clearmessage.plist > /dev/null << EOF
@@ -374,6 +383,19 @@ EOF
         <string>/private/var/run/com.apple.shutdown.started</string>
         <string>/private/var/run/com.apple.reboot.started</string>
     </array>
+    <key>LaunchEvents</key>
+    <dict>
+        <key>com.apple.system.shutdown</key>
+        <dict>
+            <key>Notification</key>
+            <string>com.apple.system.shutdown</string>
+        </dict>
+        <key>com.apple.system.reboot</key>
+        <dict>
+            <key>Notification</key>
+            <string>com.apple.system.reboot</string>
+        </dict>
+    </dict>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_clear.log</string>
     <key>StandardErrorPath</key>
@@ -399,6 +421,19 @@ EOF
         <string>/private/var/run/com.apple.shutdown.started</string>
         <string>/private/var/run/com.apple.reboot.started</string>
     </array>
+    <key>LaunchEvents</key>
+    <dict>
+        <key>com.apple.system.shutdown</key>
+        <dict>
+            <key>Notification</key>
+            <string>com.apple.system.shutdown</string>
+        </dict>
+        <key>com.apple.system.reboot</key>
+        <dict>
+            <key>Notification</key>
+            <string>com.apple.system.reboot</string>
+        </dict>
+    </dict>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_clear.log</string>
     <key>StandardErrorPath</key>
