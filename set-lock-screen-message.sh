@@ -164,21 +164,34 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 # Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
+    SHOULD_CLEAR=true
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
+    SHOULD_CLEAR=true
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+    SHOULD_CLEAR=true
 elif [[ "\$1" == "startup" ]]; then
     TRIGGER="startup event"
+    # Only clear at startup if no user is logged in (FileVault unlock scenario)
+    if [[ -n "\$(stat -f%Su /dev/console 2>/dev/null | grep -v root)" ]]; then
+        SHOULD_CLEAR=false
+        echo "\$(date): Startup event detected with logged in user - skipping clear" >> "\$LOG_FILE"
+    else
+        SHOULD_CLEAR=true
+    fi
 else
     TRIGGER="manual clear"
+    SHOULD_CLEAR=true
 fi
 
-# Clear the lock screen message
-if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-    echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
-else
-    echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+# Clear the lock screen message only if needed
+if [[ "\$SHOULD_CLEAR" == "true" ]]; then
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    else
+        echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    fi
 fi
 EOF
         else
@@ -193,21 +206,34 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 # Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
+    SHOULD_CLEAR=true
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
+    SHOULD_CLEAR=true
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+    SHOULD_CLEAR=true
 elif [[ "\$1" == "startup" ]]; then
     TRIGGER="startup event"
+    # Only clear at startup if no user is logged in (FileVault unlock scenario)
+    if [[ -n "\$(stat -f%Su /dev/console 2>/dev/null | grep -v root)" ]]; then
+        SHOULD_CLEAR=false
+        echo "\$(date): Startup event detected with logged in user - skipping clear" >> "\$LOG_FILE"
+    else
+        SHOULD_CLEAR=true
+    fi
 else
     TRIGGER="manual clear"
+    SHOULD_CLEAR=true
 fi
 
-# Clear the lock screen message
-if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-    echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
-else
-    echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+# Clear the lock screen message only if needed
+if [[ "\$SHOULD_CLEAR" == "true" ]]; then
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    else
+        echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    fi
 fi
 EOF
         fi
@@ -270,21 +296,34 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 # Check if this was triggered by a startup or shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]]; then
     TRIGGER="shutdown event"
+    SHOULD_CLEAR=true
 elif [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="reboot event"
+    SHOULD_CLEAR=true
 elif [[ -n "\$LAUNCH_EVENT" ]]; then
     TRIGGER="system event (\$LAUNCH_EVENT)"
+    SHOULD_CLEAR=true
 elif [[ "\$1" == "startup" ]]; then
     TRIGGER="startup event"
+    # Only clear at startup if no user is logged in (FileVault unlock scenario)
+    if [[ -n "\$(stat -f%Su /dev/console 2>/dev/null | grep -v root)" ]]; then
+        SHOULD_CLEAR=false
+        echo "\$(date): Startup event detected with logged in user - skipping clear" >> "\$LOG_FILE"
+    else
+        SHOULD_CLEAR=true
+    fi
 else
     TRIGGER="manual clear"
+    SHOULD_CLEAR=true
 fi
 
-# Clear the lock screen message
-if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-    echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
-else
-    echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+# Clear the lock screen message only if needed
+if [[ "\$SHOULD_CLEAR" == "true" ]]; then
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "\$(date): Lock screen message cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    else
+        echo "\$(date): Lock screen message was already cleared (\$TRIGGER)" >> "\$LOG_FILE"
+    fi
 fi
 EOF
 
@@ -591,8 +630,7 @@ EOF
         echo "   • Set the message once per login session"
         echo "   • Clear the message before shutdown/restart"
     fi
-    echo ""
-    echo "💡 Test immediately with: $0 set"
+
 
     # Validate installation for MDM deployment
     echo ""
