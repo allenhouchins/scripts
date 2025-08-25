@@ -121,8 +121,7 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]] || \\
-   [[ -f /private/var/run/com.apple.logout.started ]]; then
+   [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="shutdown/reboot event"
 else
     TRIGGER="manual clear"
@@ -146,8 +145,7 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]] || \\
-   [[ -f /private/var/run/com.apple.logout.started ]]; then
+   [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="shutdown/reboot event"
 else
     TRIGGER="manual clear"
@@ -219,8 +217,7 @@ mkdir -p "\$(dirname "\$LOG_FILE")"
 
 # Check if this was triggered by a shutdown event
 if [[ -f /private/var/run/com.apple.shutdown.started ]] || \\
-   [[ -f /private/var/run/com.apple.reboot.started ]] || \\
-   [[ -f /private/var/run/com.apple.logout.started ]]; then
+   [[ -f /private/var/run/com.apple.reboot.started ]]; then
     TRIGGER="shutdown/reboot event"
 else
     TRIGGER="manual clear"
@@ -271,14 +268,11 @@ EOF
 
     # Create special LaunchDaemon for Setup Assistant mode (triggers when first user is created)
     if [[ $EUID -eq 0 ]] && [[ "$SETUP_ASSISTANT_MODE" == "true" ]]; then
-        # Create a script that sets the message when first user is created
+        # Create a script that sets up the LaunchAgent when first user is created
         tee "$SCRIPT_DIR/setup_assistant_handler.sh" > /dev/null << EOF
 #!/bin/bash
 # This script runs when the first user is created during Setup Assistant
-
-# Set the lock screen message immediately
-defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
-echo "\$(date): Lock screen message set for first user creation" >> "/var/log/lockscreen_manager.log"
+# It only creates the LaunchAgent - the message will be set on first login
 
 # Create a LaunchAgent for the newly created user
 FIRST_USER=\$(stat -f%Su /dev/console 2>/dev/null || echo "")
@@ -290,7 +284,7 @@ if [[ -n "\$FIRST_USER" ]] && [[ "\$FIRST_USER" != "root" ]]; then
     mkdir -p "\$LAUNCH_AGENTS_DIR"
     chown -R "\$FIRST_USER" "\$LAUNCH_AGENTS_DIR"
     
-    # Create LaunchAgent for the new user
+    # Create LaunchAgent for the new user that will set message on first login
     tee "\$LAUNCH_AGENTS_DIR/com.lockscreen.setmessage.plist" > /dev/null << 'LAUNCHAGENT_EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -329,7 +323,7 @@ LAUNCHAGENT_EOF
     # Load the LaunchAgent for the new user
     sudo -u "\$FIRST_USER" launchctl load "\$LAUNCH_AGENTS_DIR/com.lockscreen.setmessage.plist" 2>/dev/null
     
-    echo "\$(date): LaunchAgent created and loaded for user \$FIRST_USER" >> "/var/log/lockscreen_manager.log"
+    echo "\$(date): LaunchAgent created and loaded for user \$FIRST_USER (message will be set on first login)" >> "/var/log/lockscreen_manager.log"
 fi
 EOF
         chmod +x "$SCRIPT_DIR/setup_assistant_handler.sh"
@@ -379,7 +373,6 @@ EOF
     <array>
         <string>/private/var/run/com.apple.shutdown.started</string>
         <string>/private/var/run/com.apple.reboot.started</string>
-        <string>/private/var/run/com.apple.logout.started</string>
     </array>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_clear.log</string>
@@ -405,7 +398,6 @@ EOF
     <array>
         <string>/private/var/run/com.apple.shutdown.started</string>
         <string>/private/var/run/com.apple.reboot.started</string>
-        <string>/private/var/run/com.apple.logout.started</string>
     </array>
     <key>StandardOutPath</key>
     <string>/tmp/lockscreen_clear.log</string>
@@ -469,16 +461,16 @@ EOF
         fi
     fi
 
-    # Set the message immediately after installation
+    # Set the message immediately after installation (except in Setup Assistant mode)
     if [[ $EUID -eq 0 ]]; then
-        if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"; then
-            if [[ "$SETUP_ASSISTANT_MODE" == "true" ]]; then
-                echo "✓ Lock screen message set for Setup Assistant"
-            else
-                echo "✓ Lock screen message set immediately"
-            fi
+        if [[ "$SETUP_ASSISTANT_MODE" == "true" ]]; then
+            echo "✓ Setup Assistant mode: Message will be set on first user login"
         else
-            echo "⚠ Warning: Failed to set message immediately"
+            if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"; then
+                echo "✓ Lock screen message set immediately"
+            else
+                echo "⚠ Warning: Failed to set message immediately"
+            fi
         fi
     else
         if sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"; then
@@ -503,8 +495,8 @@ EOF
     echo ""
     echo "🔄 The system will now:"
     if [[ "$SETUP_ASSISTANT_MODE" == "true" ]]; then
-        echo "   • Set the message when the first user is created"
-        echo "   • Create a LaunchAgent for the new user"
+        echo "   • Create a LaunchAgent when the first user is created"
+        echo "   • Set the message when the user logs in for the first time"
         echo "   • Clear the message before shutdown/restart"
     else
         echo "   • Set the message once per login session"
