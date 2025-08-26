@@ -697,7 +697,7 @@ EOF
     # Final validation result
     if [[ $VALIDATION_ERRORS -eq 0 ]]; then
         echo "✅ Installation validation successful"
-        echo "🚀 Ready for MDM deployment"
+        echo "🚀"
         exit 0
     else
         echo "❌ Installation validation failed ($VALIDATION_ERRORS errors)"
