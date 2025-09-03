@@ -5,7 +5,7 @@
 # =============================================================================
 
 # Configuration
-API_KEY="10AXi3Q7KS1pahcNfKEcL4nk5qp34huX"
+API_KEY="XXXX"
 SERVER_URL="http://192.168.1.100:8181"
 OUTPUT_FILE="watched_movies_$(date +%Y%m%d_%H%M%S).txt"
 
