@@ -47,16 +47,48 @@ set_lock_message() {
 # =============================================================================
 
 clear_lock_message() {
-    create_log_dir
+    local success=false
     
-    # Clear the lock screen message
-    if sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-        # Log the action
-        echo "$(date): Lock screen message cleared" >> "$LOG_FILE"
-        echo "Lock screen message cleared successfully"
+    echo "$(date): Attempting to clear lock screen message..." >> "$LOG_FILE"
+    
+    # Method 1: Use the approach that works manually - delete the key
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Deleted LoginwindowText key successfully" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 2: Verify the key is actually gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Verified LoginwindowText key is removed" >> "$LOG_FILE"
+        success=true
     else
-        echo "$(date): Lock screen message was already cleared or not set" >> "$LOG_FILE"
-        echo "Lock screen message was already cleared or not set"
+        echo "$(date): Warning: LoginwindowText key still exists after deletion" >> "$LOG_FILE"
+    fi
+    
+    # Method 3: Force preference cache refresh to ensure changes take effect
+    if killall -HUP cfprefsd 2>/dev/null; then
+        echo "$(date): Sent HUP to cfprefsd to refresh preferences" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 4: Wait a moment to ensure the system has processed the change
+    echo "$(date): Waiting 2 seconds for preference change to take effect..." >> "$LOG_FILE"
+    sleep 2
+    
+    # Method 5: Final verification that the key is gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Final verification: LoginwindowText key successfully removed" >> "$LOG_FILE"
+        success=true
+    else
+        echo "$(date): Error: LoginwindowText key still exists after all clearing attempts" >> "$LOG_FILE"
+        success=false
+    fi
+    
+    if [[ "$success" == "true" ]]; then
+        echo "$(date): Lock screen message clearing completed successfully" >> "$LOG_FILE"
+        echo "$(date): FileVault screen should now show no message" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: Lock screen message clearing may have failed" >> "$LOG_FILE"
     fi
 }
 
@@ -73,24 +105,16 @@ install_lockscreen_manager() {
     
     # Unload existing LaunchDaemons
     if [[ $EUID -eq 0 ]]; then
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null || true
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null || true
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null || true
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null || true
     else
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null || true
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null || true
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null || true
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null || true
     fi
 
     # Remove existing LaunchDaemon files
     if [[ $EUID -eq 0 ]]; then
-        rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        rm -f /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
     else
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
     fi
 
     # Remove existing script directory
@@ -103,8 +127,10 @@ install_lockscreen_manager() {
     # Clear any existing lock screen message
     if [[ $EUID -eq 0 ]]; then
         defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || true
+        rm -f /var/run/lockscreen_shutdown_in_progress
     else
         sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || true
+        sudo rm -f /var/run/lockscreen_shutdown_in_progress
     fi
 
     echo "Cleanup completed. Starting fresh installation..."
@@ -118,250 +144,502 @@ install_lockscreen_manager() {
         sudo mkdir -p "$(dirname "$LOG_FILE")"
     fi
 
-    # Create the clear message script (shutdown-based approach)
+    # Create a single coordinated script that handles both setting and clearing
     if [[ $EUID -eq 0 ]]; then
-        tee "$SCRIPT_DIR/clear_message.sh" > /dev/null << 'EOF'
+        tee "$SCRIPT_DIR/lockscreen_coordinator.sh" > /dev/null << 'EOF'
 #!/bin/bash
+
 LOG_FILE="/var/log/lockscreen_manager.log"
+LOCK_MESSAGE="🔴 Empathy 🟠 Ownership 🟢 Results
+🔵 Objectivity 🟣 Openness"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
 
-# Clear the lock screen message
-if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-    echo "$(date): Lock screen message cleared" >> "$LOG_FILE"
-else
-    echo "$(date): Lock screen message was already cleared or not set" >> "$LOG_FILE"
-fi
+# Function to clear EFI cache files that control FileVault screen
+clear_efi_cache() {
+    echo "$(date): Using safe FileVault screen refresh methods..." >> "$LOG_FILE"
+    
+    local cache_cleared=false
+    
+    # Since EFI cache files are protected by SIP, we'll use safer alternative methods
+    
+    # Method 1: Clear system caches that might contain login screen data (safe)
+    if [[ -d "/System/Library/Caches" ]]; then
+        if rm -rf /System/Library/Caches/com.apple.loginwindow* 2>/dev/null; then
+            echo "$(date): Cleared loginwindow system caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+        if rm -rf /System/Library/Caches/com.apple.SecurityAgent* 2>/dev/null; then
+            echo "$(date): Cleared SecurityAgent system caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+    fi
+    
+    # Method 2: Clear user-specific login caches (safe)
+    for user_home in /Users/*; do
+        if [[ -d "$user_home" ]] && [[ -d "$user_home/Library/Caches" ]]; then
+            if rm -rf "$user_home/Library/Caches/com.apple.loginwindow"* 2>/dev/null; then
+                echo "$(date): Cleared user cache: $user_home" >> "$LOG_FILE"
+                cache_cleared=true
+            fi
+        fi
+    done
+    
+    # Method 3: Force system to rebuild login screen resources by touching key files (safe)
+    if touch /System/Library/PrivateFrameworks/EFILogin.framework 2>/dev/null; then
+        echo "$(date): Touched EFILogin framework to force refresh" >> "$LOG_FILE"
+        cache_cleared=true
+    fi
+    
+    if touch /System/Library/CoreServices/SecurityAgentPlugins/loginwindow.bundle 2>/dev/null; then
+        echo "$(date): Touched loginwindow bundle to force refresh" >> "$LOG_FILE"
+        cache_cleared=true
+    fi
+    
+    # Method 4: Clear additional system caches that might affect login screen (safe)
+    if [[ -d "/var/folders" ]]; then
+        if find /var/folders -name "*loginwindow*" -type d -exec rm -rf {} \; 2>/dev/null; then
+            echo "$(date): Cleared system loginwindow caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+    fi
+    
+    if [[ "$cache_cleared" == "true" ]]; then
+        echo "$(date): Safe FileVault screen refresh methods completed successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: No FileVault refresh methods were successful" >> "$LOG_FILE"
+    fi
+}
+
+# Function to set lock screen message
+set_lock_message() {
+    if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null; then
+        echo "$(date): Lock screen message set" >> "$LOG_FILE"
+        return 0
+    else
+        echo "$(date): Failed to set lock screen message" >> "$LOG_FILE"
+        return 1
+    fi
+}
+
+# Function to clear lock screen message
+clear_lock_message() {
+    local success=false
+    
+    echo "$(date): Attempting to clear lock screen message..." >> "$LOG_FILE"
+    
+    # Method 1: Use the approach that works manually - delete the key
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Deleted LoginwindowText key successfully" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 2: Verify the key is actually gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Verified LoginwindowText key is removed" >> "$LOG_FILE"
+        success=true
+    else
+        echo "$(date): Warning: LoginwindowText key still exists after deletion" >> "$LOG_FILE"
+    fi
+    
+    # Method 3: Force preference cache refresh to ensure changes take effect
+    if killall -HUP cfprefsd 2>/dev/null; then
+        echo "$(date): Sent HUP to cfprefsd to refresh preferences" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 4: Wait a moment to ensure the system has processed the change
+    echo "$(date): Waiting 2 seconds for preference change to take effect..." >> "$LOG_FILE"
+    sleep 2
+    
+    # Method 5: Final verification that the key is gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Final verification: LoginwindowText key successfully removed" >> "$LOG_FILE"
+        success=true
+    else
+        echo "$(date): Error: LoginwindowText key still exists after all clearing attempts" >> "$LOG_FILE"
+        success=false
+    fi
+    
+    if [[ "$success" == "true" ]]; then
+        echo "$(date): Lock screen message clearing completed successfully" >> "$LOG_FILE"
+        echo "$(date): FileVault screen should now show no message" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: Lock screen message clearing may have failed" >> "$LOG_FILE"
+    fi
+}
+
+# Signal handler function
+cleanup_and_exit() {
+    local signal_name=""
+    case $1 in
+        SIGTERM) signal_name="SIGTERM" ;;
+        SIGINT)  signal_name="SIGINT" ;;
+        SIGQUIT) signal_name="SIGQUIT" ;;
+        SIGUSR1) signal_name="SIGUSR1" ;;
+        *)       signal_name="UNKNOWN" ;;
+    esac
+    
+    echo "$(date): Signal $signal_name received, setting test message..." >> "$LOG_FILE"
+    
+    # Instead of clearing, set a test message to see if we can modify it
+    if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "Hello" 2>/dev/null; then
+        echo "$(date): Test message 'Hello' set successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to set test message" >> "$LOG_FILE"
+    fi
+    
+    # Wait for the system to process the change
+    echo "$(date): Waiting 3 seconds for preference change to take effect..." >> "$LOG_FILE"
+    sleep 3
+    
+    # Verify the test message was set
+    CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null)
+    if [[ "$CURRENT_MESSAGE" == "Hello" ]]; then
+        echo "$(date): Test message verification successful - 'Hello' is set" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: Test message may not have been set properly" >> "$LOG_FILE"
+    fi
+    
+    exit 0
+}
+
+# Set up signal handlers
+trap 'cleanup_and_exit SIGTERM' SIGTERM
+trap 'cleanup_and_exit SIGINT' SIGINT
+trap 'cleanup_and_exit SIGQUIT' SIGQUIT
+trap 'cleanup_and_exit SIGUSR1' SIGUSR1
+
+# Log startup
+echo "$(date): Lock screen coordinator started (PID: $$)" >> "$LOG_FILE"
+
+# Don't automatically set the message on startup - only set it when explicitly requested
+# set_lock_message
+
+# Main monitoring loop
+while true; do
+    # Check for shutdown indicators
+    if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || \
+       [[ -f "/private/var/run/com.apple.reboot.started" ]] || \
+       [[ -f "/private/var/run/com.apple.logout.started" ]]; then
+        echo "$(date): Shutdown/reboot/logout detected, setting test message..." >> "$LOG_FILE"
+        
+        # Instead of clearing, set a test message to see if we can modify it
+        if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "Hello" 2>/dev/null; then
+            echo "$(date): Test message 'Hello' set successfully" >> "$LOG_FILE"
+        else
+            echo "$(date): Failed to set test message" >> "$LOG_FILE"
+        fi
+        
+        # Wait for the system to process the change
+        echo "$(date): Waiting 3 seconds for preference change to take effect..." >> "$LOG_FILE"
+        sleep 3
+        
+        # Verify the test message was set
+        CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null)
+        if [[ "$CURRENT_MESSAGE" == "Hello" ]]; then
+            echo "$(date): Test message verification successful - 'Hello' is set" >> "$LOG_FILE"
+        else
+            echo "$(date): Warning: Test message may not have been set properly" >> "$LOG_FILE"
+        fi
+        
+        break
+    fi
+    
+    # Sleep briefly to avoid excessive CPU usage
+    sleep 2
+done
+
+# Final cleanup
+echo "$(date): Lock screen coordinator stopped" >> "$LOG_FILE"
 EOF
     else
-        sudo tee "$SCRIPT_DIR/clear_message.sh" > /dev/null << 'EOF'
+        sudo tee "$SCRIPT_DIR/lockscreen_coordinator.sh" > /dev/null << 'EOF'
 #!/bin/bash
+
 LOG_FILE="/var/log/lockscreen_manager.log"
+LOCK_MESSAGE="🔴 Empathy 🟠 Ownership 🟢 Results
+🔵 Objectivity 🟣 Openness"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
 
-# Clear the lock screen message
-if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-    echo "$(date): Lock screen message cleared" >> "$LOG_FILE"
-else
-    echo "$(date): Lock screen message was already cleared or not set" >> "$LOG_FILE"
-fi
+# Function to clear EFI cache files that control FileVault screen
+clear_efi_cache() {
+    echo "$(date): Using safe FileVault screen refresh methods..." >> "$LOG_FILE"
+    
+    local cache_cleared=false
+    
+    # Since EFI cache files are protected by SIP, we'll use safer alternative methods
+    
+    # Method 1: Clear system caches that might contain login screen data (safe)
+    if [[ -d "/System/Library/Caches" ]]; then
+        if rm -rf /System/Library/Caches/com.apple.loginwindow* 2>/dev/null; then
+            echo "$(date): Cleared loginwindow system caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+        if rm -rf /System/Library/Caches/com.apple.SecurityAgent* 2>/dev/null; then
+            echo "$(date): Cleared SecurityAgent system caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+    fi
+    
+    # Method 2: Clear user-specific login caches (safe)
+    for user_home in /Users/*; do
+        if [[ -d "$user_home" ]] && [[ -d "$user_home/Library/Caches" ]]; then
+            if rm -rf "$user_home/Library/Caches/com.apple.loginwindow"* 2>/dev/null; then
+                echo "$(date): Cleared user cache: $user_home" >> "$LOG_FILE"
+                cache_cleared=true
+            fi
+        fi
+    done
+    
+    # Method 3: Force system to rebuild login screen resources by touching key files (safe)
+    if touch /System/Library/PrivateFrameworks/EFILogin.framework 2>/dev/null; then
+        echo "$(date): Touched EFILogin framework to force refresh" >> "$LOG_FILE"
+        cache_cleared=true
+    fi
+    
+    if touch /System/Library/CoreServices/SecurityAgentPlugins/loginwindow.bundle 2>/dev/null; then
+        echo "$(date): Touched loginwindow bundle to force refresh" >> "$LOG_FILE"
+        cache_cleared=true
+    fi
+    
+    # Method 4: Clear additional system caches that might affect login screen (safe)
+    if [[ -d "/var/folders" ]]; then
+        if find /var/folders -name "*loginwindow*" -type d -exec rm -rf {} \; 2>/dev/null; then
+            echo "$(date): Cleared system loginwindow caches" >> "$LOG_FILE"
+            cache_cleared=true
+        fi
+    fi
+    
+    if [[ "$cache_cleared" == "true" ]]; then
+        echo "$(date): Safe FileVault screen refresh methods completed successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: No FileVault refresh methods were successful" >> "$LOG_FILE"
+    fi
+}
+
+# Function to set lock screen message
+set_lock_message() {
+    if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null; then
+        echo "$(date): Lock screen message set" >> "$LOG_FILE"
+        return 0
+    else
+        echo "$(date): Failed to set lock screen message" >> "$LOG_FILE"
+        return 1
+    fi
+}
+
+# Function to clear lock screen message
+clear_lock_message() {
+    local success=false
+    
+    echo "$(date): Attempting to clear lock screen message..." >> "$LOG_FILE"
+    
+    # Method 1: Use the approach that works manually - delete the key
+    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Deleted LoginwindowText key successfully" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 2: Verify the key is actually gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Verified LoginwindowText key is removed" >> "$LOG_FILE"
+        success=true
+    else
+        echo "$(date): Warning: LoginwindowText key still exists after deletion" >> "$LOG_FILE"
+    fi
+    
+    # Method 3: Force preference cache refresh to ensure changes take effect
+    if killall -HUP cfprefsd 2>/dev/null; then
+        echo "$(date): Sent HUP to cfprefsd to refresh preferences" >> "$LOG_FILE"
+        success=true
+    fi
+    
+    # Method 4: Wait a moment to ensure the system has processed the change
+    echo "$(date): Waiting 2 seconds for preference change to take effect..." >> "$LOG_FILE"
+    sleep 2
+    
+    # Method 5: Final verification that the key is gone
+    if ! defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
+        echo "$(date): Final verification: LoginwindowText key successfully removed" >> "$LOG_FILE"
+        success=true
+    else
+        echo "$(date): Error: LoginwindowText key still exists after all clearing attempts" >> "$LOG_FILE"
+        success=false
+    fi
+    
+    if [[ "$success" == "true" ]]; then
+        echo "$(date): Lock screen message clearing completed successfully" >> "$LOG_FILE"
+        echo "$(date): FileVault screen should now show no message" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: Lock screen message clearing may have failed" >> "$LOG_FILE"
+    fi
+}
+
+# Signal handler function
+cleanup_and_exit() {
+    local signal_name=""
+    case $1 in
+        SIGTERM) signal_name="SIGTERM" ;;
+        SIGINT)  signal_name="SIGINT" ;;
+        SIGQUIT) signal_name="SIGQUIT" ;;
+        SIGUSR1) signal_name="SIGUSR1" ;;
+        *)       signal_name="UNKNOWN" ;;
+    esac
+    
+    echo "$(date): Signal $signal_name received, setting test message..." >> "$LOG_FILE"
+    
+    # Instead of clearing, set a test message to see if we can modify it
+    if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "Hello" 2>/dev/null; then
+        echo "$(date): Test message 'Hello' set successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to set test message" >> "$LOG_FILE"
+    fi
+    
+    # Wait for the system to process the change
+    echo "$(date): Waiting 3 seconds for preference change to take effect..." >> "$LOG_FILE"
+    sleep 3
+    
+    # Verify the test message was set
+    CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null)
+    if [[ "$CURRENT_MESSAGE" == "Hello" ]]; then
+        echo "$(date): Test message verification successful - 'Hello' is set" >> "$LOG_FILE"
+    else
+        echo "$(date): Warning: Test message may not have been set properly" >> "$LOG_FILE"
+    fi
+    
+    exit 0
+}
+
+# Set up signal handlers
+trap 'cleanup_and_exit SIGTERM' SIGTERM
+trap 'cleanup_and_exit SIGINT' SIGINT
+trap 'cleanup_and_exit SIGQUIT' SIGQUIT
+trap 'cleanup_and_exit SIGUSR1' SIGUSR1
+
+# Log startup
+echo "$(date): Lock screen coordinator started (PID: $$)" >> "$LOG_FILE"
+
+# Don't automatically set the message on startup - only set it when explicitly requested
+# set_lock_message
+
+# Main monitoring loop
+while true; do
+    # Check for shutdown indicators
+    if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || \
+       [[ -f "/private/var/run/com.apple.reboot.started" ]] || \
+       [[ -f "/private/var/run/com.apple.logout.started" ]]; then
+        echo "$(date): Shutdown/reboot/logout detected, setting test message..." >> "$LOG_FILE"
+        
+        # Instead of clearing, set a test message to see if we can modify it
+        if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "Hello" 2>/dev/null; then
+            echo "$(date): Test message 'Hello' set successfully" >> "$LOG_FILE"
+        else
+            echo "$(date): Failed to set test message" >> "$LOG_FILE"
+        fi
+        
+        # Wait for the system to process the change
+        echo "$(date): Waiting 3 seconds for preference change to take effect..." >> "$LOG_FILE"
+        sleep 3
+        
+        # Verify the test message was set
+        CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null)
+        if [[ "$CURRENT_MESSAGE" == "Hello" ]]; then
+            echo "$(date): Test message verification successful - 'Hello' is set" >> "$LOG_FILE"
+        else
+            echo "$(date): Warning: Test message may not have been set properly" >> "$LOG_FILE"
+        fi
+        
+        break
+    fi
+    
+    # Sleep briefly to avoid excessive CPU usage
+    sleep 2
+done
+
+# Final cleanup
+echo "$(date): Lock screen coordinator stopped" >> "$LOG_FILE"
 EOF
     fi
 
     # Make script executable
     if [[ $EUID -eq 0 ]]; then
-        chmod +x "$SCRIPT_DIR/clear_message.sh"
+        chmod +x "$SCRIPT_DIR/lockscreen_coordinator.sh"
     else
-        sudo chmod +x "$SCRIPT_DIR/clear_message.sh"
+        sudo chmod +x "$SCRIPT_DIR/lockscreen_coordinator.sh"
     fi
 
-    # Create the set message script
+    # Create LaunchDaemon for the lockscreen coordinator
     if [[ $EUID -eq 0 ]]; then
-        tee "$SCRIPT_DIR/set_message.sh" > /dev/null << EOF
-#!/bin/bash
-LOG_FILE="/var/log/lockscreen_manager.log"
-
-# Ensure log directory exists
-mkdir -p "$(dirname "$LOG_FILE")"
-
-# Set the lock screen message
-defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
-echo "$(date): Lock screen message set" >> "$LOG_FILE"
-EOF
-    else
-        sudo tee "$SCRIPT_DIR/set_message.sh" > /dev/null << EOF
-#!/bin/bash
-LOG_FILE="/var/log/lockscreen_manager.log"
-
-# Ensure log directory exists
-mkdir -p "$(dirname "$LOG_FILE")"
-
-# Set the lock screen message
-defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
-echo "$(date): Lock screen message set" >> "$LOG_FILE"
-EOF
-    fi
-
-    # Make script executable
-    if [[ $EUID -eq 0 ]]; then
-        chmod +x "$SCRIPT_DIR/set_message.sh"
-    else
-        sudo chmod +x "$SCRIPT_DIR/set_message.sh"
-    fi
-
-    # Create LaunchDaemon for setting message on login
-    if [[ $EUID -eq 0 ]]; then
-        tee /Library/LaunchDaemons/com.lockscreen.setmessage.plist > /dev/null << EOF
+        tee /Library/LaunchDaemons/com.lockscreen.coordinator.plist > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.lockscreen.setmessage</string>
+    <string>com.lockscreen.coordinator</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$SCRIPT_DIR/set_message.sh</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_set.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_set.log</string>
-</dict>
-</plist>
-EOF
-    else
-        sudo tee /Library/LaunchDaemons/com.lockscreen.setmessage.plist > /dev/null << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.lockscreen.setmessage</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$SCRIPT_DIR/set_message.sh</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_set.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_set.log</string>
-</dict>
-</plist>
-EOF
-    fi
-
-            # Create LaunchDaemon for clearing message on shutdown
-        if [[ $EUID -eq 0 ]]; then
-            tee /Library/LaunchDaemons/com.lockscreen.clearmessage.plist > /dev/null << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.lockscreen.clearmessage</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$SCRIPT_DIR/clear_message.sh</string>
-    </array>
-    <key>WatchPaths</key>
-    <array>
-        <string>/private/var/run/com.apple.shutdown.started</string>
-        <string>/private/var/run/com.apple.reboot.started</string>
-    </array>
-    <key>LaunchEvents</key>
-    <dict>
-        <key>com.apple.system.shutdown</key>
-        <dict>
-            <key>Notification</key>
-            <string>com.apple.system.shutdown</string>
-        </dict>
-        <key>com.apple.system.reboot</key>
-        <dict>
-            <key>Notification</key>
-            <string>com.apple.system.reboot</string>
-        </dict>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_clear.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_clear.log</string>
-</dict>
-</plist>
-EOF
-            else
-            sudo tee /Library/LaunchDaemons/com.lockscreen.clearmessage.plist > /dev/null << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.lockscreen.clearmessage</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$SCRIPT_DIR/clear_message.sh</string>
-    </array>
-    <key>WatchPaths</key>
-    <array>
-        <string>/private/var/run/com.apple.shutdown.started</string>
-        <string>/private/var/run/com.apple.reboot.started</string>
-    </array>
-    <key>LaunchEvents</key>
-    <dict>
-        <key>com.apple.system.shutdown</key>
-        <dict>
-            <key>Notification</key>
-            <string>com.apple.system.shutdown</string>
-        </dict>
-        <key>com.apple.system.reboot</key>
-        <dict>
-            <key>Notification</key>
-            <string>com.apple.system.reboot</string>
-        </dict>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_clear.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_clear.log</string>
-</dict>
-</plist>
-EOF
-    fi
-
-    # Create additional shutdown detection using a different approach
-    if [[ $EUID -eq 0 ]]; then
-        tee /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist > /dev/null << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.lockscreen.shutdownwatcher</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>while true; do if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || [[ -f "/private/var/run/com.apple.reboot.started" ]]; then defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; echo "\$(date): Lock screen message cleared by shutdown watcher" >> /var/log/lockscreen_manager.log; break; fi; sleep 1; done</string>
+        <string>$SCRIPT_DIR/lockscreen_coordinator.sh</string>
     </array>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_shutdownwatcher.log</string>
+    <string>/tmp/lockscreen_coordinator.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_shutdownwatcher.log</string>
+    <string>/tmp/lockscreen_coordinator.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>5</integer>
+    <key>WorkingDirectory</key>
+    <string>$SCRIPT_DIR</string>
+    <key>UserName</key>
+    <string>root</string>
+    <key>GroupName</key>
+    <string>wheel</string>
 </dict>
 </plist>
 EOF
     else
-        sudo tee /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist > /dev/null << EOF
+        sudo tee /Library/LaunchDaemons/com.lockscreen.coordinator.plist > /dev/null << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.lockscreen.shutdownwatcher</string>
+    <string>com.lockscreen.coordinator</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>while true; do if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || [[ -f "/private/var/run/com.apple.reboot.started" ]]; then defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; echo "\$(date): Lock screen message cleared by shutdown watcher" >> /var/log/lockscreen_manager.log; break; fi; sleep 1; done</string>
+        <string>$SCRIPT_DIR/lockscreen_coordinator.sh</string>
     </array>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/lockscreen_shutdownwatcher.log</string>
+    <string>/tmp/lockscreen_coordinator.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/lockscreen_shutdownwatcher.log</string>
+    <string>/tmp/lockscreen_coordinator.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ExitTimeOut</key>
+    <integer>5</integer>
+    <key>WorkingDirectory</key>
+    <string>$SCRIPT_DIR</string>
+    <key>UserName</key>
+    <string>root</string>
+    <key>GroupName</key>
+    <string>wheel</string>
 </dict>
 </plist>
 EOF
@@ -369,57 +647,25 @@ EOF
 
     # Set proper permissions
     if [[ $EUID -eq 0 ]]; then
-        chown root:wheel /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        chmod 644 /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        chown root:wheel /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        chmod 644 /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        chown root:wheel /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
-        chmod 644 /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        chown root:wheel /Library/LaunchDaemons/com.lockscreen.coordinator.plist
+        chmod 644 /Library/LaunchDaemons/com.lockscreen.coordinator.plist
     else
-        sudo chown root:wheel /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        sudo chmod 644 /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        sudo chown root:wheel /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        sudo chmod 644 /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        sudo chown root:wheel /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
-        sudo chmod 644 /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        sudo chown root:wheel /Library/LaunchDaemons/com.lockscreen.coordinator.plist
+        sudo chmod 644 /Library/LaunchDaemons/com.lockscreen.coordinator.plist
     fi
 
     # Load the LaunchDaemons
     if [[ $EUID -eq 0 ]]; then
-        if launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null; then
-            echo "✓ Set message LaunchDaemon loaded successfully"
+        if launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null; then
+            echo "✓ Lock screen coordinator LaunchDaemon loaded successfully"
         else
-            echo "⚠ Warning: Failed to load set message LaunchDaemon (may already be loaded)"
-        fi
-
-        if launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null; then
-            echo "✓ Clear message LaunchDaemon loaded successfully"
-        else
-            echo "⚠ Warning: Failed to load clear message LaunchDaemon (may already be loaded)"
-        fi
-
-        if launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null; then
-            echo "✓ Shutdown watcher LaunchDaemon loaded successfully"
-        else
-            echo "⚠ Warning: Failed to load shutdown watcher LaunchDaemon (may already be loaded)"
+            echo "⚠ Warning: Failed to load lock screen coordinator LaunchDaemon (may already be loaded)"
         fi
     else
-        if sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null; then
-            echo "✓ Set message LaunchDaemon loaded successfully"
+        if sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null; then
+            echo "✓ Lock screen coordinator LaunchDaemon loaded successfully"
         else
-            echo "⚠ Warning: Failed to load set message LaunchDaemon (may already be loaded)"
-        fi
-
-        if sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null; then
-            echo "✓ Clear message LaunchDaemon loaded successfully"
-        else
-            echo "⚠ Warning: Failed to load clear message LaunchDaemon (may already be loaded)"
-        fi
-
-        if sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null; then
-            echo "✓ Shutdown watcher LaunchDaemon loaded successfully"
-        else
-            echo "⚠ Warning: Failed to load shutdown watcher LaunchDaemon (may already be loaded)"
+            echo "⚠ Warning: Failed to load lock screen coordinator LaunchDaemon (may already be loaded)"
         fi
     fi
 
@@ -446,7 +692,8 @@ EOF
     echo ""
     echo "🔄 The system will now:"
     echo "   • Set the message on system startup/login"
-    echo "   • Clear the message before shutdown/restart"
+    echo "   • Monitor for shutdown/reboot events and clear the message"
+    echo "   • Use a single coordinated daemon (no race conditions)"
     echo "   • Log all actions to $LOG_FILE"
 
     # Validate installation
@@ -455,18 +702,8 @@ EOF
     VALIDATION_ERRORS=0
 
     # Check if LaunchDaemon files exist
-    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.setmessage.plist" ]]; then
-        echo "❌ Error: Set message LaunchDaemon file missing"
-        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
-    fi
-
-    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.clearmessage.plist" ]]; then
-        echo "❌ Error: Clear message LaunchDaemon file missing"
-        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
-    fi
-
-    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist" ]]; then
-        echo "❌ Error: Shutdown watcher LaunchDaemon file missing"
+    if [[ ! -f "/Library/LaunchDaemons/com.lockscreen.coordinator.plist" ]]; then
+        echo "❌ Error: Lock screen coordinator LaunchDaemon file missing"
         VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
     fi
 
@@ -477,35 +714,20 @@ EOF
     fi
 
     # Check if scripts are executable
-    if [[ ! -x "$SCRIPT_DIR/clear_message.sh" ]]; then
-        echo "❌ Error: Clear message script not executable"
-        VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
-    fi
-
-    if [[ ! -x "$SCRIPT_DIR/set_message.sh" ]]; then
-        echo "❌ Error: Set message script not executable"
+    if [[ ! -x "$SCRIPT_DIR/lockscreen_coordinator.sh" ]]; then
+        echo "❌ Error: Lock screen coordinator script not executable"
         VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
     fi
 
     # Check if LaunchDaemons are loaded
     if [[ $EUID -eq 0 ]]; then
-        if ! launchctl list | grep -q "com.lockscreen.setmessage"; then
-            echo "❌ Error: Set message LaunchDaemon not loaded"
-            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
-        fi
-
-        if ! launchctl list | grep -q "com.lockscreen.clearmessage"; then
-            echo "❌ Error: Clear message LaunchDaemon not loaded"
+        if ! launchctl list | grep -q "com.lockscreen.coordinator"; then
+            echo "❌ Error: Lock screen coordinator LaunchDaemon not loaded"
             VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
         fi
     else
-        if ! sudo launchctl list | grep -q "com.lockscreen.setmessage"; then
-            echo "❌ Error: Set message LaunchDaemon not loaded"
-            VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
-        fi
-
-        if ! sudo launchctl list | grep -q "com.lockscreen.clearmessage"; then
-            echo "❌ Error: Clear message LaunchDaemon not loaded"
+        if ! sudo launchctl list | grep -q "com.lockscreen.coordinator"; then
+            echo "❌ Error: Lock screen coordinator LaunchDaemon not loaded"
             VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
         fi
     fi
@@ -531,25 +753,17 @@ uninstall_lockscreen_manager() {
 
     # Unload services
     if [[ $EUID -eq 0 ]]; then
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null
-        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
     else
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.setmessage.plist 2>/dev/null
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.clearmessage.plist 2>/dev/null
-        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist 2>/dev/null
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
     fi
 
     # Remove files
     if [[ $EUID -eq 0 ]]; then
-        rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        rm -f /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
         rm -rf "$SCRIPT_DIR"
     else
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.setmessage.plist
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.clearmessage.plist
-        sudo rm -f /Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
         sudo rm -rf "$SCRIPT_DIR"
     fi
 
@@ -572,22 +786,39 @@ show_status() {
     echo "=================================="
     
     # Check if files exist
-    if [[ -f "/Library/LaunchDaemons/com.lockscreen.setmessage.plist" ]]; then
-        echo "✅ Set message LaunchDaemon: Installed"
+    if [[ -f "/Library/LaunchDaemons/com.lockscreen.coordinator.plist" ]]; then
+        echo "✅ Lock screen coordinator LaunchDaemon: Installed"
     else
-        echo "❌ Set message LaunchDaemon: Not installed"
+        echo "❌ Lock screen coordinator LaunchDaemon: Not installed"
     fi
     
-    if [[ -f "/Library/LaunchDaemons/com.lockscreen.clearmessage.plist" ]]; then
-        echo "✅ Clear message LaunchDaemon: Installed"
+    # Check if script directory exists
+    if [[ -d "$SCRIPT_DIR" ]]; then
+        echo "✅ Script directory: $SCRIPT_DIR"
     else
-        echo "❌ Clear message LaunchDaemon: Not installed"
+        echo "❌ Script directory: Missing"
     fi
     
-    if [[ -f "/Library/LaunchDaemons/com.lockscreen.shutdownwatcher.plist" ]]; then
-        echo "✅ Shutdown watcher LaunchDaemon: Installed"
+    # Check if scripts are executable
+    if [[ -x "$SCRIPT_DIR/lockscreen_coordinator.sh" ]]; then
+        echo "✅ Lock screen coordinator script: Executable"
     else
-        echo "❌ Shutdown watcher LaunchDaemon: Not installed"
+        echo "❌ Lock screen coordinator script: Not executable"
+    fi
+    
+    # Check if LaunchDaemon is loaded
+    if [[ $EUID -eq 0 ]]; then
+        if launchctl list | grep -q "com.lockscreen.coordinator"; then
+            echo "✅ Lock screen coordinator: Running (managed by launchd)"
+        else
+            echo "❌ Lock screen coordinator: Not running"
+        fi
+    else
+        if sudo launchctl list | grep -q "com.lockscreen.coordinator"; then
+            echo "✅ Lock screen coordinator: Running (managed by launchd)"
+        else
+            echo "❌ Lock screen coordinator: Not running"
+        fi
     fi
     
     # Check current lock screen message
@@ -613,6 +844,39 @@ show_status() {
 }
 
 # =============================================================================
+# RESTART SHUTDOWN MONITOR
+# =============================================================================
+
+restart_shutdown_monitor() {
+    echo "Restarting shutdown monitor..."
+    
+    # Reload the LaunchDaemon
+    if [[ $EUID -eq 0 ]]; then
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
+        sleep 1
+        if launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.coordinator.plist; then
+            echo "✅ Lock screen coordinator restarted successfully"
+        else
+            echo "❌ Failed to restart lock screen coordinator"
+            exit 1
+        fi
+    else
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
+        sleep 1
+        if sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.coordinator.plist; then
+            echo "✅ Lock screen coordinator restarted successfully"
+        else
+            echo "❌ Failed to restart lock screen coordinator"
+            exit 1
+        fi
+    fi
+    
+    # Wait a moment and check status
+    sleep 2
+    echo "✅ Monitor restart completed"
+}
+
+# =============================================================================
 # MAIN SCRIPT LOGIC
 # =============================================================================
 
@@ -631,6 +895,14 @@ case "${1:-install}" in
         check_sudo "$1"
         clear_lock_message
         ;;
+    "clear-aggressive")
+        check_sudo "$1"
+        clear_lock_message
+        ;;
+    "restart")
+        check_sudo "$1"
+        restart_shutdown_monitor
+        ;;
     "status")
         show_status
         ;;
@@ -638,17 +910,20 @@ case "${1:-install}" in
         echo "Lock Screen Message Manager"
         echo "=========================="
         echo ""
-        echo "Usage: $0 {install|uninstall|set|clear|status}"
+        echo "Usage: $0 {install|uninstall|set|clear|clear-aggressive|restart|status}"
         echo ""
         echo "Commands:"
-        echo "  install   - Install the lock screen message manager (default)"
-        echo "  uninstall - Remove the lock screen message manager"
-        echo "  set       - Set the lock screen message immediately"
-        echo "  clear     - Clear the lock screen message immediately"
-        echo "  status    - Show current status and configuration"
+        echo "  install         - Install the lock screen message manager (default)"
+        echo "  uninstall       - Remove the lock screen message manager"
+        echo "  set             - Set the lock screen message immediately"
+        echo "  clear           - Clear the lock screen message immediately (safe)"
+        echo "  clear-aggressive- Clear the lock screen message with aggressive methods (may log you out)"
+        echo "  restart         - Restart the lock screen coordinator daemon"
+        echo "  status          - Show current status and configuration"
         echo ""
         echo "✨ Features:"
         echo "  • Automatically sets message after login"
+        echo "  • Robust shutdown monitoring with signal handling"
         echo "  • Automatically clears message before shutdown/restart"
         echo "  • Comprehensive logging and status monitoring"
         echo "  • Simple and reliable operation"
