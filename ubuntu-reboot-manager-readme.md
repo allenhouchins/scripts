@@ -3,6 +3,8 @@
 ## Installation Steps
 
 ### 1. Install Dependencies
+**Note: The script will automatically install zenity if missing, but you can install it manually first:**
+
 ```bash
 # Ubuntu/Debian
 sudo apt update
@@ -14,6 +16,8 @@ sudo dnf install zenity
 # Arch/Manjaro
 sudo pacman -S zenity
 ```
+
+**Automatic Installation**: If zenity is not found, the script will automatically attempt to install it using the appropriate package manager for your distribution.
 
 ### 2. Create and Install the Script
 ```bash
@@ -87,9 +91,10 @@ You can modify these variables at the top of the script:
 ### Common Issues:
 
 **No notifications appearing:**
-- Verify zenity is installed: `which zenity`
+- Verify zenity is installed: `which zenity` (script will auto-install if missing)
 - Check if users have DISPLAY environment variable set
 - Ensure script is running as root
+- Check log file for zenity installation messages
 
 **Script not running:**
 - Check cron service: `sudo systemctl status cron`
@@ -157,12 +162,13 @@ sudo systemctl start cronie
 
 ## Script Features
 
-### Automatic Distribution Detection
-The script automatically detects your Linux distribution and provides appropriate zenity installation instructions for:
-- Ubuntu/Debian (apt)
-- Fedora/RHEL/CentOS (dnf)
-- Arch/Manjaro (pacman)
-- Unknown distributions (generic message)
+### Automatic Distribution Detection & Package Installation
+The script automatically detects your Linux distribution and:
+- **Auto-installs zenity** if missing using the appropriate package manager:
+  - Ubuntu/Debian (apt-get)
+  - Fedora/RHEL/CentOS (dnf/yum)
+  - Arch/Manjaro (pacman)
+- **Falls back gracefully** for unknown distributions with manual installation instructions
 
 ### Error Handling
 - Graceful handling of missing zenity package

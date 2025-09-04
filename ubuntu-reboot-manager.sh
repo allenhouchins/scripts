@@ -37,6 +37,57 @@ detect_distro() {
     fi
 }
 
+# Function to install zenity automatically
+install_zenity() {
+    local distro
+    distro=$(detect_distro)
+    
+    log_message "Attempting to install zenity on $distro system"
+    
+    case "$distro" in
+        ubuntu|debian)
+            if command -v apt-get &> /dev/null; then
+                apt-get update -qq && apt-get install -y zenity
+                if [ $? -eq 0 ]; then
+                    log_message "Successfully installed zenity via apt-get"
+                    return 0
+                fi
+            fi
+            ;;
+        fedora|rhel|centos)
+            if command -v dnf &> /dev/null; then
+                dnf install -y zenity
+                if [ $? -eq 0 ]; then
+                    log_message "Successfully installed zenity via dnf"
+                    return 0
+                fi
+            elif command -v yum &> /dev/null; then
+                yum install -y zenity
+                if [ $? -eq 0 ]; then
+                    log_message "Successfully installed zenity via yum"
+                    return 0
+                fi
+            fi
+            ;;
+        arch|manjaro)
+            if command -v pacman &> /dev/null; then
+                pacman -Sy --noconfirm zenity
+                if [ $? -eq 0 ]; then
+                    log_message "Successfully installed zenity via pacman"
+                    return 0
+                fi
+            fi
+            ;;
+        *)
+            log_message "ERROR: Unknown distribution '$distro' - cannot auto-install zenity"
+            return 1
+            ;;
+    esac
+    
+    log_message "ERROR: Failed to install zenity on $distro system"
+    return 1
+}
+
 # Function to send notification to all logged-in users
 send_notification() {
     local title="$1"
@@ -131,23 +182,34 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Check if zenity is installed and suggest installation if missing
+# Check if zenity is installed and auto-install if missing
 if ! command -v zenity &> /dev/null; then
-    local distro
-    distro=$(detect_distro)
-    case "$distro" in
-        ubuntu|debian)
-            echo "Error: Zenity is not installed. Install with: apt-get install zenity"
-            ;;
-        fedora|rhel|centos)
-            echo "Error: Zenity is not installed. Install with: dnf install zenity"
-            ;;
-        *)
-            echo "Error: Zenity is not installed. Please install zenity package for your distribution"
-            ;;
-    esac
-    log_message "ERROR: Zenity not installed on $distro system"
-    exit 1
+    log_message "Zenity not found - attempting automatic installation"
+    
+    if install_zenity; then
+        log_message "Zenity successfully installed - continuing script execution"
+    else
+        local distro
+        distro=$(detect_distro)
+        echo "Error: Failed to automatically install zenity on $distro system"
+        echo "Please install zenity manually:"
+        case "$distro" in
+            ubuntu|debian)
+                echo "  apt-get install zenity"
+                ;;
+            fedora|rhel|centos)
+                echo "  dnf install zenity"
+                ;;
+            arch|manjaro)
+                echo "  pacman -S zenity"
+                ;;
+            *)
+                echo "  Install zenity package for your distribution"
+                ;;
+        esac
+        log_message "ERROR: Failed to install zenity - script cannot continue"
+        exit 1
+    fi
 fi
 
 # Get current uptime in days
