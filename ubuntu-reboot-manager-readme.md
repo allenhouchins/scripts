@@ -4,8 +4,15 @@
 
 ### 1. Install Dependencies
 ```bash
+# Ubuntu/Debian
 sudo apt update
 sudo apt install zenity
+
+# Fedora/RHEL/CentOS
+sudo dnf install zenity
+
+# Arch/Manjaro
+sudo pacman -S zenity
 ```
 
 ### 2. Create and Install the Script
@@ -69,9 +76,11 @@ You can modify these variables at the top of the script:
 
 ### Safety Features:
 - Comprehensive logging to `/var/log/reboot-manager.log`
-- Multiple notification methods
+- Multiple notification methods (GUI + terminal)
 - 5-minute final warning before forced reboot
-- Log rotation to prevent large files
+- Log rotation to prevent large files (keeps last 1000 lines)
+- Automatic distribution detection for proper zenity installation instructions
+- Clean exit after scheduling reboot to prevent race conditions
 
 ## Troubleshooting
 
@@ -127,13 +136,39 @@ sudo systemctl start crond
 - Standard cron service should work out of the box
 - Zenity typically pre-installed on desktop versions
 
+**Arch/Manjaro Additional Steps:**
+```bash
+# Install zenity
+sudo pacman -S zenity
+
+# Enable and start cronie (Arch uses cronie instead of cron)
+sudo systemctl enable cronie
+sudo systemctl start cronie
+```
+
 ## Security Considerations
 
 - Script must run as root (required for reboot and cross-user notifications)
 - Log file contains system uptime information
 - **SELinux systems**: May require custom policy for cross-user GUI access
 - **Firewall**: No network access required
+- **Script integrity**: The script includes automatic distribution detection and proper error handling
 - Test thoroughly before deploying to production systems
+
+## Script Features
+
+### Automatic Distribution Detection
+The script automatically detects your Linux distribution and provides appropriate zenity installation instructions for:
+- Ubuntu/Debian (apt)
+- Fedora/RHEL/CentOS (dnf)
+- Arch/Manjaro (pacman)
+- Unknown distributions (generic message)
+
+### Error Handling
+- Graceful handling of missing zenity package
+- Proper exit codes for different failure scenarios
+- Comprehensive logging of all operations
+- Clean shutdown after scheduling reboot
 
 ## Customization Examples
 

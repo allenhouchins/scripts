@@ -142,9 +142,6 @@ if ! command -v zenity &> /dev/null; then
         fedora|rhel|centos)
             echo "Error: Zenity is not installed. Install with: dnf install zenity"
             ;;
-        arch|manjaro)
-            echo "Error: Zenity is not installed. Install with: pacman -S zenity"
-            ;;
         *)
             echo "Error: Zenity is not installed. Please install zenity package for your distribution"
             ;;
