@@ -105,11 +105,34 @@ sudo grep "WARNING" /var/log/reboot-manager.log
 sudo grep "FORCED REBOOT" /var/log/reboot-manager.log
 ```
 
+### Distribution-Specific Considerations
+
+**Fedora/RHEL/CentOS Additional Steps:**
+```bash
+# If SELinux is enforcing, you may need to allow the script to run
+# Check SELinux status
+getenforce
+
+# If needed, create SELinux policy or set permissive mode for testing
+# sudo setenforce 0  # Temporary - for testing only
+# For production, create proper SELinux policy
+
+# Fedora uses 'crond' instead of 'cron'
+sudo systemctl enable crond
+sudo systemctl start crond
+```
+
+**Ubuntu/Debian Additional Notes:**
+- AppArmor is generally permissive for this use case
+- Standard cron service should work out of the box
+- Zenity typically pre-installed on desktop versions
+
 ## Security Considerations
 
 - Script must run as root (required for reboot and cross-user notifications)
 - Log file contains system uptime information
-- Consider firewall rules if accessing remote systems
+- **SELinux systems**: May require custom policy for cross-user GUI access
+- **Firewall**: No network access required
 - Test thoroughly before deploying to production systems
 
 ## Customization Examples
