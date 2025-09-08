@@ -24,6 +24,54 @@ create_log_dir() {
     mkdir -p "$(dirname "$LOG_FILE")"
 }
 
+# Get the preboot volume UUID dynamically
+get_preboot_uuid() {
+    # Find the preboot volume UUID by looking for the system volume
+    local system_volume_uuid
+    system_volume_uuid=$(diskutil info / | grep "Volume UUID" | awk '{print $3}')
+    
+    if [[ -z "$system_volume_uuid" ]]; then
+        echo "ERROR: Could not determine system volume UUID" >&2
+        return 1
+    fi
+    
+    # The preboot volume UUID is typically the same as the system volume UUID
+    # but let's verify by checking if the path exists
+    local preboot_path="/System/Volumes/Preboot/$system_volume_uuid"
+    
+    if [[ -d "$preboot_path" ]]; then
+        echo "$system_volume_uuid"
+        return 0
+    else
+        # Fallback: try to find any preboot volume
+        local preboot_volumes
+        preboot_volumes=$(ls /System/Volumes/Preboot/ 2>/dev/null | grep -E '^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$')
+        
+        if [[ -n "$preboot_volumes" ]]; then
+            # Use the first valid preboot volume found
+            echo "$preboot_volumes" | head -1
+            return 0
+        else
+            echo "ERROR: Could not find preboot volume" >&2
+            return 1
+        fi
+    fi
+}
+
+# Get the full preboot plist path
+get_preboot_plist_path() {
+    local uuid
+    uuid=$(get_preboot_uuid)
+    
+    if [[ $? -eq 0 && -n "$uuid" ]]; then
+        echo "/System/Volumes/Preboot/$uuid/Library/Preferences/com.apple.loginwindow.plist"
+        return 0
+    else
+        echo "ERROR: Could not determine preboot plist path" >&2
+        return 1
+    fi
+}
+
 # =============================================================================
 # SET LOCK SCREEN MESSAGE SCRIPT
 # =============================================================================
@@ -88,12 +136,17 @@ clear_lock_message() {
     echo "$(date): Updating preboot volume for FileVault screen..." >> "$LOG_FILE"
     
     # Log preboot volume state before update
-    PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+    if [[ $? -ne 0 ]]; then
+        echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+        return 1
+    fi
+    PREBOOT_MESSAGE_BEFORE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
     echo "$(date): Preboot volume message before update: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
     
     # Directly clear the message from preboot volume plist file
     echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
-    if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+    if plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null; then
         echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
     else
         echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
@@ -101,7 +154,7 @@ clear_lock_message() {
     
     # Try to create a minimal plist file without LoginwindowText to ensure it's cleared
     echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
     if [ $? -eq 0 ]; then
         echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
     else
@@ -123,7 +176,7 @@ clear_lock_message() {
     fi
     
     # Log preboot volume state after update
-    PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    PREBOOT_MESSAGE_AFTER=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
     echo "$(date): Preboot volume message after update: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
     
     # Wait for changes to take effect
@@ -237,12 +290,17 @@ clear_lock_message() {
     echo "$(date): Updating preboot volume for FileVault screen..." >> "$LOG_FILE"
     
     # Log preboot volume state before update
-    PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+    if [[ $? -ne 0 ]]; then
+        echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+        return 1
+    fi
+    PREBOOT_MESSAGE_BEFORE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
     echo "$(date): Preboot volume message before update: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
     
     # Directly clear the message from preboot volume plist file
     echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
-    if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+    if plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null; then
         echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
     else
         echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
@@ -250,7 +308,7 @@ clear_lock_message() {
     
     # Try to create a minimal plist file without LoginwindowText to ensure it's cleared
     echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
     if [ $? -eq 0 ]; then
         echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
     else
@@ -272,7 +330,7 @@ clear_lock_message() {
     fi
     
     # Log preboot volume state after update
-    PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    PREBOOT_MESSAGE_AFTER=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
     echo "$(date): Preboot volume message after update: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
     
     # Wait for changes to take effect
@@ -337,7 +395,12 @@ echo "$(date): Proactively clearing message from preboot volume after startup...
 echo "$(date): Clearing preboot volume only (keeping system preferences message)..." >> "$LOG_FILE"
 
 # Log current state
-PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+if [[ $? -ne 0 ]]; then
+    echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+    exit 1
+fi
+PREBOOT_MESSAGE_BEFORE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
 SYSTEM_MESSAGE_BEFORE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
 echo "$(date): Preboot volume message before proactive clearing: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
 echo "$(date): System preferences message before proactive clearing: $SYSTEM_MESSAGE_BEFORE" >> "$LOG_FILE"
@@ -348,7 +411,7 @@ sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 
 
 # Directly clear the message from preboot volume plist file
 echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
-if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+if plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null; then
     echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
 else
     echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
@@ -356,7 +419,7 @@ fi
 
 # Try to create a minimal plist file without LoginwindowText to ensure it's cleared
 echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
-printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
 if [ $? -eq 0 ]; then
     echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
 else
@@ -382,7 +445,7 @@ echo "$(date): Restoring system preferences message..." >> "$LOG_FILE"
 sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
 
 # Log final state
-PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+PREBOOT_MESSAGE_AFTER=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
 SYSTEM_MESSAGE_AFTER=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
 echo "$(date): Preboot volume message after proactive clearing: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
 echo "$(date): System preferences message after proactive clearing: $SYSTEM_MESSAGE_AFTER" >> "$LOG_FILE"
@@ -440,7 +503,12 @@ while true; do
         echo "$(date): Running periodic proactive clearing..." >> "$LOG_FILE"
         
         # Check current state
-        PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+        PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+        if [[ $? -ne 0 ]]; then
+            echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+            continue
+        fi
+        PREBOOT_MESSAGE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
         if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
             echo "$(date): Preboot volume has message, clearing it..." >> "$LOG_FILE"
             
@@ -448,8 +516,8 @@ while true; do
             sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
             
             # Clear preboot volume
-            plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
-            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+            plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
             
             # Run updatePreboot
             diskutil apfs updatePreboot / >/dev/null 2>&1
@@ -498,7 +566,12 @@ echo "$(date): Immediate startup script running (PID: $$)" >> "$LOG_FILE"
 sleep 5
 
 # Check if preboot volume has message and clear it if needed
-PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+if [[ $? -ne 0 ]]; then
+    echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+    exit 1
+fi
+PREBOOT_MESSAGE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
 echo "$(date): Startup script - preboot volume message: $PREBOOT_MESSAGE" >> "$LOG_FILE"
 
 if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
@@ -508,8 +581,8 @@ if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
     defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
     
     # Clear preboot volume
-    plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
     
     # Run updatePreboot
     diskutil apfs updatePreboot / >/dev/null 2>&1
@@ -544,7 +617,12 @@ echo "$(date): Immediate startup script running (PID: $$)" >> "$LOG_FILE"
 sleep 5
 
 # Check if preboot volume has message and clear it if needed
-PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+PREBOOT_PLIST_PATH=$(get_preboot_plist_path)
+if [[ $? -ne 0 ]]; then
+    echo "$(date): ERROR: Could not determine preboot plist path" >> "$LOG_FILE"
+    exit 1
+fi
+PREBOOT_MESSAGE=$(defaults read "$PREBOOT_PLIST_PATH" LoginwindowText 2>/dev/null || echo "NOT_SET")
 echo "$(date): Startup script - preboot volume message: $PREBOOT_MESSAGE" >> "$LOG_FILE"
 
 if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
@@ -554,8 +632,8 @@ if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
     defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
     
     # Clear preboot volume
-    plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
-    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    plutil -remove LoginwindowText "$PREBOOT_PLIST_PATH" 2>/dev/null
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "$PREBOOT_PLIST_PATH"
     
     # Run updatePreboot
     diskutil apfs updatePreboot / >/dev/null 2>&1
