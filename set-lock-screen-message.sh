@@ -34,6 +34,28 @@ set_lock_message() {
     if sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"; then
         echo "$(date): Lock screen message set" >> "$LOG_FILE"
         echo "Lock screen message set successfully"
+        
+        # Clear the message from system preferences to prepare for preboot sync
+        echo "$(date): Clearing message from system preferences to prepare for preboot sync..." >> "$LOG_FILE"
+        sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+        
+        # Update preboot volume with cleared state
+        echo "$(date): Updating preboot volume with cleared state..." >> "$LOG_FILE"
+        UPDATE_OUTPUT=$(sudo diskutil apfs updatePreboot / 2>&1)
+        UPDATE_EXIT_CODE=$?
+        echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
+        echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
+        
+        if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+            echo "$(date): Preboot volume updated successfully - FileVault message should be cleared" >> "$LOG_FILE"
+        else
+            echo "$(date): Failed to update preboot volume: $UPDATE_OUTPUT" >> "$LOG_FILE"
+        fi
+        
+        # Set the message again in system preferences for lock screen display
+        echo "$(date): Setting message again in system preferences for lock screen display..." >> "$LOG_FILE"
+        sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+        echo "$(date): Lock screen message restored for display" >> "$LOG_FILE"
     else
         echo "Failed to set lock screen message" >&2
         exit 1
@@ -47,18 +69,72 @@ set_lock_message() {
 clear_lock_message() {
     echo "$(date): Clearing lock screen message..." >> "$LOG_FILE"
     
+    # Log current state before clearing
+    CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Current message in system preferences: $CURRENT_MESSAGE" >> "$LOG_FILE"
+    
     # Clear the message
     if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
         echo "$(date): Message cleared from system preferences" >> "$LOG_FILE"
+    else
+        echo "$(date): Lock screen message was already cleared or not set" >> "$LOG_FILE"
     fi
     
+    # Verify message was cleared from system preferences
+    VERIFIED_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Verified system preferences message: $VERIFIED_MESSAGE" >> "$LOG_FILE"
+    
     # Update preboot volume for FileVault compatibility
-    if diskutil apfs updatePreboot / 2>/dev/null; then
-        echo "$(date): Preboot volume updated for FileVault screen" >> "$LOG_FILE"
+    echo "$(date): Updating preboot volume for FileVault screen..." >> "$LOG_FILE"
+    
+    # Log preboot volume state before update
+    PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Preboot volume message before update: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
+    
+    # Directly clear the message from preboot volume plist file
+    echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
+    if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+        echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
     fi
+    
+    # Try to create a minimal plist file without LoginwindowText to ensure it's cleared
+    echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    if [ $? -eq 0 ]; then
+        echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to create minimal preboot plist file" >> "$LOG_FILE"
+    fi
+    
+    # Run updatePreboot with detailed logging
+    echo "$(date): Running: diskutil apfs updatePreboot /" >> "$LOG_FILE"
+    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+    UPDATE_EXIT_CODE=$?
+    echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
+    echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
+    
+    if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+        echo "$(date): Preboot volume updated successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): ERROR: Failed to update preboot volume (exit code: $UPDATE_EXIT_CODE)" >> "$LOG_FILE"
+        echo "$(date): WARNING: updatePreboot failed, but direct plist modification should still work" >> "$LOG_FILE"
+    fi
+    
+    # Log preboot volume state after update
+    PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Preboot volume message after update: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
     
     # Wait for changes to take effect
     sleep 2
+    
+    # Final verification
+    if [ "$PREBOOT_MESSAGE_AFTER" = "NOT_SET" ]; then
+        echo "$(date): SUCCESS: Message cleared from preboot volume" >> "$LOG_FILE"
+    else
+        echo "$(date): WARNING: Message still exists in preboot volume: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
+    fi
     
     echo "$(date): Lock screen message clearing completed" >> "$LOG_FILE"
 }
@@ -94,94 +170,6 @@ install_lockscreen_manager() {
 
     # Create the coordinator script
     if [[ $EUID -eq 0 ]]; then
-        tee "$SCRIPT_DIR/lockscreen_coordinator.sh" > /dev/null << 'EOF'
-#!/bin/bash
-
-LOG_FILE="/var/log/lockscreen_manager.log"
-LOCK_MESSAGE="🔴 Empathy 🟠 Ownership 🟢 Results
-🔵 Objectivity 🟣 Openness"
-
-# Ensure log directory exists
-mkdir -p "$(dirname "$LOG_FILE")"
-
-# Function to set lock screen message
-set_lock_message() {
-    if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null; then
-        echo "$(date): Lock screen message set" >> "$LOG_FILE"
-        return 0
-    else
-        echo "$(date): Failed to set lock screen message" >> "$LOG_FILE"
-        return 1
-    fi
-}
-
-# Function to clear lock screen message
-clear_lock_message() {
-    echo "$(date): Clearing lock screen message..." >> "$LOG_FILE"
-    
-    # Clear the message
-    if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
-        echo "$(date): Message cleared from system preferences" >> "$LOG_FILE"
-    fi
-    
-    # Update preboot volume for FileVault compatibility
-    if diskutil apfs updatePreboot / 2>/dev/null; then
-        echo "$(date): Preboot volume updated for FileVault screen" >> "$LOG_FILE"
-    fi
-    
-    # Wait for changes to take effect
-    sleep 2
-    
-    echo "$(date): Lock screen message clearing completed" >> "$LOG_FILE"
-}
-
-# Signal handler for shutdown
-cleanup_and_exit() {
-    echo "$(date): Shutdown signal received, clearing message..." >> "$LOG_FILE"
-    clear_lock_message
-    exit 0
-}
-
-# Set up signal handlers
-trap cleanup_and_exit SIGTERM SIGINT SIGQUIT SIGUSR1 SIGUSR2 SIGHUP EXIT
-
-# Log startup
-echo "$(date): Lock screen coordinator started (PID: $$)" >> "$LOG_FILE"
-
-# Set message on startup
-set_lock_message
-
-# Record startup time to avoid false shutdown detection during startup
-STARTUP_TIME=$(date +%s)
-
-# Main monitoring loop
-while true; do
-    # Check for shutdown indicators
-    if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || \
-       [[ -f "/private/var/run/com.apple.reboot.started" ]] || \
-       [[ -f "/private/var/run/com.apple.logout.started" ]]; then
-        echo "$(date): Shutdown/reboot/logout detected, clearing message..." >> "$LOG_FILE"
-        clear_lock_message
-        break
-    fi
-    
-    # Check if system processes are stopping (shutdown indicator)
-    # Only check this if we've been running for at least 30 seconds to avoid false positives during startup
-    CURRENT_TIME=$(date +%s)
-    if [[ $((CURRENT_TIME - STARTUP_TIME)) -gt 30 ]]; then
-        if ! pgrep -f "WindowServer\|loginwindow" > /dev/null 2>&1; then
-            echo "$(date): System processes stopped, clearing message..." >> "$LOG_FILE"
-            clear_lock_message
-            break
-        fi
-    fi
-    
-    sleep 2
-done
-
-echo "$(date): Lock screen coordinator stopped" >> "$LOG_FILE"
-EOF
-    else
         sudo tee "$SCRIPT_DIR/lockscreen_coordinator.sh" > /dev/null << 'EOF'
 #!/bin/bash
 
@@ -195,7 +183,30 @@ mkdir -p "$(dirname "$LOG_FILE")"
 # Function to set lock screen message
 set_lock_message() {
     if defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null; then
-        echo "$(date): Lock screen message set" >> "$LOG_FILE"
+        echo "$(date): Lock screen message set in system preferences" >> "$LOG_FILE"
+        
+        # Clear the message from system preferences to prepare for preboot sync
+        echo "$(date): Clearing message from system preferences to prepare for preboot sync..." >> "$LOG_FILE"
+        defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+        
+        # Update preboot volume with cleared state
+        echo "$(date): Updating preboot volume with cleared state..." >> "$LOG_FILE"
+        UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+        UPDATE_EXIT_CODE=$?
+        echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
+        echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
+        
+        if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+            echo "$(date): Preboot volume updated successfully - FileVault message should be cleared" >> "$LOG_FILE"
+        else
+            echo "$(date): Failed to update preboot volume: $UPDATE_OUTPUT" >> "$LOG_FILE"
+        fi
+        
+        # Set the message again in system preferences for lock screen display
+        echo "$(date): Setting message again in system preferences for lock screen display..." >> "$LOG_FILE"
+        defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+        echo "$(date): Lock screen message restored for display" >> "$LOG_FILE"
+        
         return 0
     else
         echo "$(date): Failed to set lock screen message" >> "$LOG_FILE"
@@ -207,18 +218,72 @@ set_lock_message() {
 clear_lock_message() {
     echo "$(date): Clearing lock screen message..." >> "$LOG_FILE"
     
+    # Log current state before clearing
+    CURRENT_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Current message in system preferences: $CURRENT_MESSAGE" >> "$LOG_FILE"
+    
     # Clear the message
     if defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null; then
         echo "$(date): Message cleared from system preferences" >> "$LOG_FILE"
+    else
+        echo "$(date): Lock screen message was already cleared or not set" >> "$LOG_FILE"
     fi
     
+    # Verify message was cleared from system preferences
+    VERIFIED_MESSAGE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Verified system preferences message: $VERIFIED_MESSAGE" >> "$LOG_FILE"
+    
     # Update preboot volume for FileVault compatibility
-    if diskutil apfs updatePreboot / 2>/dev/null; then
-        echo "$(date): Preboot volume updated for FileVault screen" >> "$LOG_FILE"
+    echo "$(date): Updating preboot volume for FileVault screen..." >> "$LOG_FILE"
+    
+    # Log preboot volume state before update
+    PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Preboot volume message before update: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
+    
+    # Directly clear the message from preboot volume plist file
+    echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
+    if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+        echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
     fi
+    
+    # Try to create a minimal plist file without LoginwindowText to ensure it's cleared
+    echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    if [ $? -eq 0 ]; then
+        echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
+    else
+        echo "$(date): Failed to create minimal preboot plist file" >> "$LOG_FILE"
+    fi
+    
+    # Run updatePreboot with detailed logging
+    echo "$(date): Running: diskutil apfs updatePreboot /" >> "$LOG_FILE"
+    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+    UPDATE_EXIT_CODE=$?
+    echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
+    echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
+    
+    if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+        echo "$(date): Preboot volume updated successfully" >> "$LOG_FILE"
+    else
+        echo "$(date): ERROR: Failed to update preboot volume (exit code: $UPDATE_EXIT_CODE)" >> "$LOG_FILE"
+        echo "$(date): WARNING: updatePreboot failed, but direct plist modification should still work" >> "$LOG_FILE"
+    fi
+    
+    # Log preboot volume state after update
+    PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+    echo "$(date): Preboot volume message after update: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
     
     # Wait for changes to take effect
     sleep 2
+    
+    # Final verification
+    if [ "$PREBOOT_MESSAGE_AFTER" = "NOT_SET" ]; then
+        echo "$(date): SUCCESS: Message cleared from preboot volume" >> "$LOG_FILE"
+    else
+        echo "$(date): WARNING: Message still exists in preboot volume: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
+    fi
     
     echo "$(date): Lock screen message clearing completed" >> "$LOG_FILE"
 }
@@ -236,31 +301,165 @@ trap cleanup_and_exit SIGTERM SIGINT SIGQUIT SIGUSR1 SIGUSR2 SIGHUP EXIT
 # Log startup
 echo "$(date): Lock screen coordinator started (PID: $$)" >> "$LOG_FILE"
 
+# Check if we're in shutdown mode (don't set message if system is shutting down)
+if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || \
+   [[ -f "/private/var/run/com.apple.reboot.started" ]] || \
+   [[ -f "/private/var/run/com.apple.logout.started" ]]; then
+    echo "$(date): System is shutting down, not setting message" >> "$LOG_FILE"
+    exit 0
+fi
+
+# Also check if system processes are already stopped (indicates shutdown in progress)
+# Wait up to 30 seconds for system processes to start during boot
+STARTUP_WAIT=0
+while [[ $STARTUP_WAIT -lt 30 ]]; do
+    if pgrep -i WindowServer > /dev/null 2>&1 && pgrep -i loginwindow > /dev/null 2>&1; then
+        echo "$(date): System processes detected after ${STARTUP_WAIT} seconds" >> "$LOG_FILE"
+        break
+    fi
+    echo "$(date): Waiting for system processes to start... (${STARTUP_WAIT}/30 seconds)" >> "$LOG_FILE"
+    sleep 2
+    STARTUP_WAIT=$((STARTUP_WAIT + 2))
+done
+
+# If processes still aren't running after 30 seconds, assume shutdown
+if ! pgrep -i WindowServer > /dev/null 2>&1 || ! pgrep -i loginwindow > /dev/null 2>&1; then
+    echo "$(date): System processes not running after 30 seconds, likely shutting down - not setting message" >> "$LOG_FILE"
+    exit 0
+fi
+
 # Set message on startup
 set_lock_message
+
+# Immediately clear the message from preboot volume to ensure FileVault screen stays clear
+echo "$(date): Proactively clearing message from preboot volume after startup..." >> "$LOG_FILE"
+# Only clear preboot volume, not system preferences
+echo "$(date): Clearing preboot volume only (keeping system preferences message)..." >> "$LOG_FILE"
+
+# Log current state
+PREBOOT_MESSAGE_BEFORE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+SYSTEM_MESSAGE_BEFORE=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+echo "$(date): Preboot volume message before proactive clearing: $PREBOOT_MESSAGE_BEFORE" >> "$LOG_FILE"
+echo "$(date): System preferences message before proactive clearing: $SYSTEM_MESSAGE_BEFORE" >> "$LOG_FILE"
+
+# Temporarily clear system preferences to prevent updatePreboot from re-syncing the message
+echo "$(date): Temporarily clearing system preferences to prevent updatePreboot from re-syncing..." >> "$LOG_FILE"
+sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+
+# Directly clear the message from preboot volume plist file
+echo "$(date): Directly clearing message from preboot volume plist file..." >> "$LOG_FILE"
+if plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null; then
+    echo "$(date): Successfully removed LoginwindowText from preboot volume plist" >> "$LOG_FILE"
+else
+    echo "$(date): Failed to remove LoginwindowText from preboot volume plist (may not exist)" >> "$LOG_FILE"
+fi
+
+# Try to create a minimal plist file without LoginwindowText to ensure it's cleared
+echo "$(date): Creating minimal preboot plist file to ensure message is cleared..." >> "$LOG_FILE"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+if [ $? -eq 0 ]; then
+    echo "$(date): Successfully created minimal preboot plist file" >> "$LOG_FILE"
+else
+    echo "$(date): Failed to create minimal preboot plist file" >> "$LOG_FILE"
+fi
+
+# Run updatePreboot with detailed logging (now with cleared system preferences)
+echo "$(date): Running: diskutil apfs updatePreboot /" >> "$LOG_FILE"
+UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+UPDATE_EXIT_CODE=$?
+echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
+echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
+
+if [ $UPDATE_EXIT_CODE -eq 0 ]; then
+    echo "$(date): Preboot volume updated successfully" >> "$LOG_FILE"
+else
+    echo "$(date): ERROR: Failed to update preboot volume (exit code: $UPDATE_EXIT_CODE)" >> "$LOG_FILE"
+    echo "$(date): WARNING: updatePreboot failed, but direct plist modification should still work" >> "$LOG_FILE"
+fi
+
+# Restore system preferences message
+echo "$(date): Restoring system preferences message..." >> "$LOG_FILE"
+sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+
+# Log final state
+PREBOOT_MESSAGE_AFTER=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+SYSTEM_MESSAGE_AFTER=$(defaults read /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null || echo "NOT_SET")
+echo "$(date): Preboot volume message after proactive clearing: $PREBOOT_MESSAGE_AFTER" >> "$LOG_FILE"
+echo "$(date): System preferences message after proactive clearing: $SYSTEM_MESSAGE_AFTER" >> "$LOG_FILE"
+
+# Final verification
+if [ "$PREBOOT_MESSAGE_AFTER" = "NOT_SET" ] && [ "$SYSTEM_MESSAGE_AFTER" != "NOT_SET" ]; then
+    echo "$(date): SUCCESS: Proactive clearing completed - FileVault screen clear, lock screen shows message" >> "$LOG_FILE"
+else
+    echo "$(date): WARNING: Proactive clearing may not have worked as expected" >> "$LOG_FILE"
+fi
+
+echo "$(date): Proactive preboot clearing completed" >> "$LOG_FILE"
 
 # Record startup time to avoid false shutdown detection during startup
 STARTUP_TIME=$(date +%s)
 
 # Main monitoring loop
 while true; do
-    # Check for shutdown indicators
+    # Check for shutdown indicators - clear message early when system is still operational
     if [[ -f "/private/var/run/com.apple.shutdown.started" ]] || \
        [[ -f "/private/var/run/com.apple.reboot.started" ]] || \
        [[ -f "/private/var/run/com.apple.logout.started" ]]; then
         echo "$(date): Shutdown/reboot/logout detected, clearing message..." >> "$LOG_FILE"
+        echo "$(date): Shutdown files found:" >> "$LOG_FILE"
+        [[ -f "/private/var/run/com.apple.shutdown.started" ]] && echo "$(date): - /private/var/run/com.apple.shutdown.started" >> "$LOG_FILE"
+        [[ -f "/private/var/run/com.apple.reboot.started" ]] && echo "$(date): - /private/var/run/com.apple.reboot.started" >> "$LOG_FILE"
+        [[ -f "/private/var/run/com.apple.logout.started" ]] && echo "$(date): - /private/var/run/com.apple.logout.started" >> "$LOG_FILE"
+        
+        # Clear message immediately while system is still operational
+        echo "$(date): Clearing message early while DiskManagement framework is available..." >> "$LOG_FILE"
         clear_lock_message
-        break
+        
+        echo "$(date): Lock screen coordinator stopped" >> "$LOG_FILE"
+        exit 0
     fi
     
     # Check if system processes are stopping (shutdown indicator)
     # Only check this if we've been running for at least 30 seconds to avoid false positives during startup
     CURRENT_TIME=$(date +%s)
     if [[ $((CURRENT_TIME - STARTUP_TIME)) -gt 30 ]]; then
-        if ! pgrep -f "WindowServer\|loginwindow" > /dev/null 2>&1; then
+        if ! pgrep -i WindowServer > /dev/null 2>&1 || ! pgrep -i loginwindow > /dev/null 2>&1; then
             echo "$(date): System processes stopped, clearing message..." >> "$LOG_FILE"
+            WINDOWSERVER_PID=$(pgrep -i WindowServer 2>/dev/null || echo "NOT_FOUND")
+            LOGINWINDOW_PID=$(pgrep -i loginwindow 2>/dev/null || echo "NOT_FOUND")
+            echo "$(date): WindowServer PID: $WINDOWSERVER_PID" >> "$LOG_FILE"
+            echo "$(date): loginwindow PID: $LOGINWINDOW_PID" >> "$LOG_FILE"
             clear_lock_message
-            break
+            echo "$(date): Lock screen coordinator stopped" >> "$LOG_FILE"
+            exit 0
+        fi
+    fi
+    
+    # Run proactive clearing every 30 seconds to ensure preboot volume stays clear
+    if [[ $((CURRENT_TIME - STARTUP_TIME)) -gt 30 ]] && [[ $((CURRENT_TIME % 30)) -lt 2 ]]; then
+        echo "$(date): Running periodic proactive clearing..." >> "$LOG_FILE"
+        
+        # Check current state
+        PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+        if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
+            echo "$(date): Preboot volume has message, clearing it..." >> "$LOG_FILE"
+            
+            # Temporarily clear system preferences
+            sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+            
+            # Clear preboot volume
+            plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+            
+            # Run updatePreboot
+            diskutil apfs updatePreboot / >/dev/null 2>&1
+            
+            # Restore system preferences
+            sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+            
+            echo "$(date): Periodic proactive clearing completed" >> "$LOG_FILE"
+        else
+            echo "$(date): Preboot volume already clear, no action needed" >> "$LOG_FILE"
         fi
     fi
     
@@ -276,6 +475,108 @@ EOF
         chmod +x "$SCRIPT_DIR/lockscreen_coordinator.sh"
     else
         sudo chmod +x "$SCRIPT_DIR/lockscreen_coordinator.sh"
+    fi
+
+    # Create immediate startup script for rapid reboot protection
+    if [[ $EUID -eq 0 ]]; then
+        tee "$SCRIPT_DIR/lockscreen_startup.sh" > /dev/null << 'EOF'
+#!/bin/bash
+
+# Immediate startup script for rapid reboot protection
+# This script runs immediately on boot to clear preboot volume
+
+LOG_FILE="/var/log/lockscreen_manager.log"
+LOCK_MESSAGE="🔴 Empathy 🟠 Ownership 🟢 Results
+🔵 Objectivity 🟣 Openness"
+
+# Create log directory if it doesn't exist
+mkdir -p "$(dirname "$LOG_FILE")"
+
+echo "$(date): Immediate startup script running (PID: $$)" >> "$LOG_FILE"
+
+# Wait a moment for system to stabilize
+sleep 5
+
+# Check if preboot volume has message and clear it if needed
+PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+echo "$(date): Startup script - preboot volume message: $PREBOOT_MESSAGE" >> "$LOG_FILE"
+
+if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
+    echo "$(date): Startup script - clearing preboot volume message..." >> "$LOG_FILE"
+    
+    # Temporarily clear system preferences
+    defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+    
+    # Clear preboot volume
+    plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    
+    # Run updatePreboot
+    diskutil apfs updatePreboot / >/dev/null 2>&1
+    
+    # Restore system preferences
+    defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+    
+    echo "$(date): Startup script - preboot volume cleared successfully" >> "$LOG_FILE"
+else
+    echo "$(date): Startup script - preboot volume already clear" >> "$LOG_FILE"
+fi
+
+echo "$(date): Immediate startup script completed" >> "$LOG_FILE"
+EOF
+    else
+        sudo tee "$SCRIPT_DIR/lockscreen_startup.sh" > /dev/null << 'EOF'
+#!/bin/bash
+
+# Immediate startup script for rapid reboot protection
+# This script runs immediately on boot to clear preboot volume
+
+LOG_FILE="/var/log/lockscreen_manager.log"
+LOCK_MESSAGE="🔴 Empathy 🟠 Ownership 🟢 Results
+🔵 Objectivity 🟣 Openness"
+
+# Create log directory if it doesn't exist
+mkdir -p "$(dirname "$LOG_FILE")"
+
+echo "$(date): Immediate startup script running (PID: $$)" >> "$LOG_FILE"
+
+# Wait a moment for system to stabilize
+sleep 5
+
+# Check if preboot volume has message and clear it if needed
+PREBOOT_MESSAGE=$(defaults read "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" LoginwindowText 2>/dev/null || echo "NOT_SET")
+echo "$(date): Startup script - preboot volume message: $PREBOOT_MESSAGE" >> "$LOG_FILE"
+
+if [ "$PREBOOT_MESSAGE" != "NOT_SET" ]; then
+    echo "$(date): Startup script - clearing preboot volume message..." >> "$LOG_FILE"
+    
+    # Temporarily clear system preferences
+    defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
+    
+    # Clear preboot volume
+    plutil -remove LoginwindowText "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist" 2>/dev/null
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n</dict>\n</plist>\n' > "/System/Volumes/Preboot/FA59CAA1-3C82-49B6-B213-ADCAB4CBD501/Library/Preferences/com.apple.loginwindow.plist"
+    
+    # Run updatePreboot
+    diskutil apfs updatePreboot / >/dev/null 2>&1
+    
+    # Restore system preferences
+    defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE"
+    
+    echo "$(date): Startup script - preboot volume cleared successfully" >> "$LOG_FILE"
+else
+    echo "$(date): Startup script - preboot volume already clear" >> "$LOG_FILE"
+fi
+
+echo "$(date): Immediate startup script completed" >> "$LOG_FILE"
+EOF
+    fi
+
+    # Make startup script executable
+    if [[ $EUID -eq 0 ]]; then
+        chmod +x "$SCRIPT_DIR/lockscreen_startup.sh"
+    else
+        sudo chmod +x "$SCRIPT_DIR/lockscreen_startup.sh"
     fi
 
     # Create LaunchDaemon
@@ -367,6 +668,83 @@ EOF
         sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null || true
     fi
 
+    # Create LaunchDaemon for startup script (runs immediately on boot)
+    if [[ $EUID -eq 0 ]]; then
+        tee /Library/LaunchDaemons/com.lockscreen.startup.plist > /dev/null << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lockscreen.startup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$SCRIPT_DIR/lockscreen_startup.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/lockscreen_startup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/lockscreen_startup.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>WorkingDirectory</key>
+    <string>$SCRIPT_DIR</string>
+    <key>UserName</key>
+    <string>root</string>
+    <key>GroupName</key>
+    <string>wheel</string>
+</dict>
+</plist>
+EOF
+    else
+        sudo tee /Library/LaunchDaemons/com.lockscreen.startup.plist > /dev/null << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lockscreen.startup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$SCRIPT_DIR/lockscreen_startup.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/lockscreen_startup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/lockscreen_startup.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>WorkingDirectory</key>
+    <string>$SCRIPT_DIR</string>
+    <key>UserName</key>
+    <string>root</string>
+    <key>GroupName</key>
+    <string>wheel</string>
+</dict>
+</plist>
+EOF
+    fi
+
+    # Set proper permissions for startup LaunchDaemon
+    if [[ $EUID -eq 0 ]]; then
+        chown root:wheel /Library/LaunchDaemons/com.lockscreen.startup.plist
+        chmod 644 /Library/LaunchDaemons/com.lockscreen.startup.plist
+    else
+        sudo chown root:wheel /Library/LaunchDaemons/com.lockscreen.startup.plist
+        sudo chmod 644 /Library/LaunchDaemons/com.lockscreen.startup.plist
+    fi
+
+    # Load the startup LaunchDaemon
+    if [[ $EUID -eq 0 ]]; then
+        launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.startup.plist 2>/dev/null || true
+    else
+        sudo launchctl bootstrap system /Library/LaunchDaemons/com.lockscreen.startup.plist 2>/dev/null || true
+    fi
+
     # Set the message immediately and update preboot volume
     if [[ $EUID -eq 0 ]]; then
         defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null || true
@@ -398,12 +776,16 @@ uninstall_lockscreen_manager() {
     # Unload services
     if [[ $EUID -eq 0 ]]; then
         launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
+        launchctl bootout system /Library/LaunchDaemons/com.lockscreen.startup.plist 2>/dev/null
         rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
+        rm -f /Library/LaunchDaemons/com.lockscreen.startup.plist
         rm -rf "$SCRIPT_DIR"
         defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
     else
         sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.coordinator.plist 2>/dev/null
+        sudo launchctl bootout system /Library/LaunchDaemons/com.lockscreen.startup.plist 2>/dev/null
         sudo rm -f /Library/LaunchDaemons/com.lockscreen.coordinator.plist
+        sudo rm -f /Library/LaunchDaemons/com.lockscreen.startup.plist
         sudo rm -rf "$SCRIPT_DIR"
         sudo defaults delete /Library/Preferences/com.apple.loginwindow LoginwindowText 2>/dev/null
     fi
@@ -421,9 +803,15 @@ show_status() {
     
     # Check if files exist
     if [[ -f "/Library/LaunchDaemons/com.lockscreen.coordinator.plist" ]]; then
-        echo "✅ LaunchDaemon: Installed"
+        echo "✅ Coordinator LaunchDaemon: Installed"
     else
-        echo "❌ LaunchDaemon: Not installed"
+        echo "❌ Coordinator LaunchDaemon: Not installed"
+    fi
+    
+    if [[ -f "/Library/LaunchDaemons/com.lockscreen.startup.plist" ]]; then
+        echo "✅ Startup LaunchDaemon: Installed"
+    else
+        echo "❌ Startup LaunchDaemon: Not installed"
     fi
     
     # Check if script directory exists
