@@ -12,6 +12,9 @@ PLIST_PATH="/Library/Preferences/com.netflix.Escrow-Buddy.plist"
 PLIST_DOMAIN="com.netflix.Escrow-Buddy"
 KEY_NAME="GenerateNewKey"
 
+# Global variable for backup file cleanup
+BACKUP_FILE=""
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -75,9 +78,25 @@ backup_plist() {
     if cp "$PLIST_PATH" "$backup_path" 2>/dev/null; then
         print_status "$BLUE" "📋 Backup created: $backup_path"
         log_message "Backup created: $backup_path"
+        # Store backup path globally for cleanup later
+        BACKUP_FILE="$backup_path"
     else
         print_status "$YELLOW" "⚠️  Warning: Could not create backup"
         log_message "WARNING: Could not create backup of $PLIST_PATH"
+        BACKUP_FILE=""
+    fi
+}
+
+# Function to cleanup backup file
+cleanup_backup() {
+    if [[ -n "$BACKUP_FILE" && -f "$BACKUP_FILE" ]]; then
+        if rm "$BACKUP_FILE" 2>/dev/null; then
+            print_status "$GREEN" "🗑️  Backup file cleaned up: $BACKUP_FILE"
+            log_message "Backup file cleaned up: $BACKUP_FILE"
+        else
+            print_status "$YELLOW" "⚠️  Warning: Could not remove backup file: $BACKUP_FILE"
+            log_message "WARNING: Could not remove backup file: $BACKUP_FILE"
+        fi
     fi
 }
 
@@ -203,6 +222,9 @@ main() {
             echo ""
             print_status "$GREEN" "🎉 FileVault key rotation initiated successfully!"
             log_message "SUCCESS: FileVault key rotation completed successfully"
+            
+            # Clean up backup file after successful verification
+            cleanup_backup
             
             # Show next steps
             show_next_steps
