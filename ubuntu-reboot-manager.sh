@@ -168,13 +168,13 @@ install_cron_job() {
     
     log_message "Installing cron job: $cron_entry"
     
-    # Check if cron job already exists
+    # Check if cron job already exists in root crontab
     if crontab -l 2>/dev/null | grep -q "$script_path"; then
         log_message "Cron job already exists for this script"
         return 0
     fi
     
-    # Add cron job
+    # Add cron job to root crontab
     (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
     
     if [ $? -eq 0 ]; then
@@ -192,7 +192,7 @@ remove_cron_job() {
     
     log_message "Removing cron job for: $script_path"
     
-    # Remove cron job
+    # Remove cron job from root crontab
     crontab -l 2>/dev/null | grep -v "$script_path" | crontab -
     
     if [ $? -eq 0 ]; then
@@ -229,7 +229,7 @@ show_status() {
     echo "Log file: $LOG_FILE"
     echo ""
     
-    # Check if cron job exists
+    # Check if cron job exists in root crontab
     if crontab -l 2>/dev/null | grep -q "$(realpath "$0")"; then
         echo "Cron job: INSTALLED"
     else
