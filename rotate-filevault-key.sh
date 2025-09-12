@@ -30,7 +30,14 @@ log_message() {
 print_status() {
     local color="$1"
     local message="$2"
-    echo -e "${color}${message}${NC}"
+    
+    # Check if we're in a terminal that supports colors
+    if [ -t 1 ] && [ "${TERM:-}" != "dumb" ]; then
+        echo -e "${color}${message}${NC}"
+    else
+        # Strip color codes for non-terminal output
+        echo "$message"
+    fi
 }
 
 # Function to check if running as root
