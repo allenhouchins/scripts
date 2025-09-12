@@ -101,7 +101,7 @@ set_lock_message() {
         
         # Try to update preboot volume, but don't fail if it doesn't work
         echo "$(date): Attempting to update preboot volume..." >> "$LOG_FILE"
-        if sudo diskutil apfs updatePreboot / 2>/dev/null; then
+        if sudo diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1; then
             echo "$(date): Preboot volume updated successfully" >> "$LOG_FILE"
         else
             echo "$(date): Preboot volume update failed, but system preferences updated" >> "$LOG_FILE"
@@ -219,7 +219,7 @@ set_lock_message() {
         
         # Update preboot volume with cleared state
         echo "$(date): Updating preboot volume with cleared state..." >> "$LOG_FILE"
-        UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+        UPDATE_OUTPUT=$(diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1)
         UPDATE_EXIT_CODE=$?
         echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
         echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
@@ -293,7 +293,7 @@ clear_lock_message() {
     
     # Run updatePreboot with detailed logging
     echo "$(date): Running: diskutil apfs updatePreboot /" >> "$LOG_FILE"
-    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1)
     UPDATE_EXIT_CODE=$?
     echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
     echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
@@ -403,7 +403,7 @@ else
 
     # Run updatePreboot with detailed logging (now with cleared system preferences)
     echo "$(date): Running: diskutil apfs updatePreboot /" >> "$LOG_FILE"
-    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / 2>&1)
+    UPDATE_OUTPUT=$(diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1)
     UPDATE_EXIT_CODE=$?
     echo "$(date): updatePreboot exit code: $UPDATE_EXIT_CODE" >> "$LOG_FILE"
     echo "$(date): updatePreboot output: $UPDATE_OUTPUT" >> "$LOG_FILE"
@@ -613,10 +613,10 @@ EOF
     # Set the message immediately
     if [[ $EUID -eq 0 ]]; then
         defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null || true
-        diskutil apfs updatePreboot / 2>/dev/null || true
+        diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1 || true
     else
         sudo defaults write /Library/Preferences/com.apple.loginwindow LoginwindowText "$LOCK_MESSAGE" 2>/dev/null || true
-        sudo diskutil apfs updatePreboot / 2>/dev/null || true
+        sudo diskutil apfs updatePreboot / >> "$LOG_FILE" 2>&1 || true
     fi
 
     echo "✅ Installation complete!"
