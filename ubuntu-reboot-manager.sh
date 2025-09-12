@@ -106,29 +106,18 @@ send_notification() {
     
     # Send notification to each logged-in user
     for user in $users; do
-        local user_display
-        user_display=$(sudo -u "$user" printenv DISPLAY 2>/dev/null)
-        
-        if [ -n "$user_display" ]; then
-            sudo -u "$user" DISPLAY="$user_display" zenity \
-                --notification \
-                --window-icon="$icon" \
-                --text="$message" \
-                --timeout="$timeout" 2>/dev/null &
-                
+        # Try GUI notification first (simplified approach)
+        if sudo -u "$user" zenity --notification --text="$message" --timeout="$timeout" 2>/dev/null; then
+            log_message "GUI notification sent to user: $user"
+            
             # Also show a dialog for important messages
             if [ "$icon" = "warning" ] || [ "$icon" = "error" ]; then
-                sudo -u "$user" DISPLAY="$user_display" zenity \
-                    --"$icon" \
-                    --title="$title" \
-                    --text="$message" \
-                    --width=400 \
-                    --timeout=30 2>/dev/null &
+                sudo -u "$user" zenity --"$icon" --title="$title" --text="$message" --width=400 --timeout=30 2>/dev/null &
             fi
-            
-            log_message "Notification sent to user: $user (DISPLAY: $user_display)"
         else
-            log_message "No DISPLAY found for user: $user"
+            # Fall back to wall message for users without GUI
+            wall "NOTIFICATION: $message"
+            log_message "Wall message sent to user: $user (no GUI available)"
         fi
     done
 }
@@ -172,8 +161,127 @@ perform_forced_reboot() {
     exit 0
 }
 
+# Function to install cron job
+install_cron_job() {
+    local script_path="$1"
+    local cron_entry="0 12 * * * $script_path"
+    
+    log_message "Installing cron job: $cron_entry"
+    
+    # Check if cron job already exists
+    if crontab -l 2>/dev/null | grep -q "$script_path"; then
+        log_message "Cron job already exists for this script"
+        return 0
+    fi
+    
+    # Add cron job
+    (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
+    
+    if [ $? -eq 0 ]; then
+        log_message "Cron job installed successfully"
+        return 0
+    else
+        log_message "ERROR: Failed to install cron job"
+        return 1
+    fi
+}
+
+# Function to remove cron job
+remove_cron_job() {
+    local script_path="$1"
+    
+    log_message "Removing cron job for: $script_path"
+    
+    # Remove cron job
+    crontab -l 2>/dev/null | grep -v "$script_path" | crontab -
+    
+    if [ $? -eq 0 ]; then
+        log_message "Cron job removed successfully"
+        return 0
+    else
+        log_message "ERROR: Failed to remove cron job"
+        return 1
+    fi
+}
+
+# Function to show usage
+show_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --install-cron    Install daily cron job (runs at 12 noon)"
+    echo "  --remove-cron     Remove cron job"
+    echo "  --status          Show current status and uptime"
+    echo "  --help            Show this help message"
+    echo ""
+    echo "Without options, script runs the uptime check and notifications."
+}
+
+# Function to show status
+show_status() {
+    local uptime_days
+    uptime_days=$(get_uptime_days)
+    
+    echo "=== Reboot Manager Status ==="
+    echo "Current uptime: $uptime_days days"
+    echo "Warning threshold: $WARNING_DAYS days"
+    echo "Forced reboot threshold: $FORCED_REBOOT_DAYS days"
+    echo "Log file: $LOG_FILE"
+    echo ""
+    
+    # Check if cron job exists
+    if crontab -l 2>/dev/null | grep -q "$(realpath "$0")"; then
+        echo "Cron job: INSTALLED"
+    else
+        echo "Cron job: NOT INSTALLED"
+    fi
+    
+    # Show recent log entries
+    if [ -f "$LOG_FILE" ]; then
+        echo ""
+        echo "Recent log entries:"
+        tail -n 5 "$LOG_FILE"
+    fi
+}
+
 # Main execution starts here
 log_message "Script started"
+
+# Handle command line arguments
+case "${1:-}" in
+    --install-cron)
+        if [ "$EUID" -ne 0 ]; then
+            echo "Error: This option must be run as root"
+            exit 1
+        fi
+        install_cron_job "$(realpath "$0")"
+        exit $?
+        ;;
+    --remove-cron)
+        if [ "$EUID" -ne 0 ]; then
+            echo "Error: This option must be run as root"
+            exit 1
+        fi
+        remove_cron_job "$(realpath "$0")"
+        exit $?
+        ;;
+    --status)
+        show_status
+        exit 0
+        ;;
+    --help)
+        show_usage
+        exit 0
+        ;;
+    "")
+        # No arguments - run normal uptime check
+        ;;
+    *)
+        echo "Error: Unknown option '$1'"
+        show_usage
+        exit 1
+        ;;
+esac
 
 # Check if running as root (required for notifications and reboot)
 if [ "$EUID" -ne 0 ]; then
