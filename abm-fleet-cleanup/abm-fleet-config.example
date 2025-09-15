@@ -1,0 +1,24 @@
+# Apple Business Manager & Fleet Device Cleanup Configuration
+# Copy this file to abm-fleet-config and customize with your values
+
+# Apple Business Manager API Configuration
+# Get these values from your Apple Business Manager account
+export ABM_KEY_ID="your_abm_key_id_here"
+export ABM_ISSUER_ID="your_abm_issuer_id_here"
+export ABM_PRIVATE_KEY_PATH="/path/to/your/abm_private_key.p8"
+
+# Fleet MDM Configuration
+# Get these values from your Fleet instance
+export FLEET_BASE_URL="https://your-fleet-instance.com"
+export FLEET_API_TOKEN="your_fleet_api_token_here"
+
+# Optional Configuration
+export FLEET_INACTIVITY_DAYS="30"  # Days of inactivity before device is eligible for deletion
+export DRY_RUN="false"             # Set to "true" for dry-run mode
+export VERBOSE="false"             # Set to "true" for verbose logging
+
+# Usage:
+# 1. Copy this file: cp abm-fleet-config.example abm-fleet-config
+# 2. Edit abm-fleet-config with your actual values
+# 3. Source the config: source abm-fleet-config
+# 4. Run the script: ./abm-fleet-device-cleanup.sh

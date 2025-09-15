@@ -211,10 +211,12 @@ show_usage() {
     echo "Options:"
     echo "  --install-cron    Install daily cron job (runs at 12 noon)"
     echo "  --remove-cron     Remove cron job"
+    echo "  --no-cron         Run without installing cron job"
     echo "  --status          Show current status and uptime"
     echo "  --help            Show this help message"
     echo ""
-    echo "Without options, script runs the uptime check and notifications."
+    echo "Default behavior: Runs uptime check, notifications, and auto-installs cron job if missing."
+    echo "Use --no-cron to run without cron installation."
 }
 
 # Function to show status
@@ -273,8 +275,12 @@ case "${1:-}" in
         show_usage
         exit 0
         ;;
+    --no-cron)
+        # Run without installing cron job
+        log_message "Running without cron installation (--no-cron flag)"
+        ;;
     "")
-        # No arguments - run normal uptime check
+        # No arguments - run normal uptime check and install cron if needed
         ;;
     *)
         echo "Error: Unknown option '$1'"
@@ -288,6 +294,20 @@ if [ "$EUID" -ne 0 ]; then
     echo "Error: This script must be run as root"
     log_message "ERROR: Script not run as root"
     exit 1
+fi
+
+# Auto-install cron job if not already installed (unless --no-cron flag is used)
+if [ "${1:-}" != "--no-cron" ]; then
+    if ! crontab -l 2>/dev/null | grep -q "$(realpath "$0")"; then
+        log_message "Cron job not found - installing automatically"
+        if install_cron_job "$(realpath "$0")"; then
+            log_message "Cron job installed successfully - script will run daily at 12 noon"
+        else
+            log_message "WARNING: Failed to install cron job - script will not run automatically"
+        fi
+    else
+        log_message "Cron job already installed - continuing with uptime check"
+    fi
 fi
 
 # Check if zenity is installed and auto-install if missing
