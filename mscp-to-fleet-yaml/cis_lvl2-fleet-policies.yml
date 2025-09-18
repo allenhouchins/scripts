@@ -11,7 +11,7 @@ spec:
 
     This rule ensures that audit information and audit files are configured to be readable and writable only by system administrators, thereby preventing unauthorized access, modification, and deletion of files.'
   resolution: /bin/chmod -RN /var/audit
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE (path LIKE '/var/audit/%' OR path LIKE '/etc/security/%') AND extended_attributes LIKE '%com.apple.acl%';
   purpose: Informational
   tags:
   - compliance
@@ -30,7 +30,7 @@ spec:
 
     Audit logs contain sensitive data about the system and users. This rule ensures that the audit service is configured to create log folders that are readable and writable only by system administrators in order to prevent normal users from reading audit logs.'
   resolution: /bin/chmod -N /var/audit
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE (path LIKE '/var/audit/%' OR path LIKE '/etc/security/%') AND type = 'directory' AND extended_attributes LIKE '%com.apple.acl%';
   purpose: Informational
   tags:
   - compliance
@@ -65,7 +65,7 @@ spec:
     /bin/launchctl bootstrap system /System/Library/LaunchDaemons/com.apple.auditd.plist
 
     /usr/sbin/audit -i'
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM launchd WHERE name = 'com.apple.auditd' AND state = 'running';
   purpose: Informational
   tags:
   - compliance
@@ -82,7 +82,7 @@ spec:
   platform: darwin
   description: /etc/security/auditcontrol MUST_ not contain Access Control Lists (ACLs).
   resolution: /bin/chmod -N /etc/security/audit_control
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -99,7 +99,7 @@ spec:
   platform: darwin
   description: /etc/security/auditcontrol MUST_ have the group set to wheel.
   resolution: /usr/bin/chgrp wheel /etc/security/audit_control
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -116,7 +116,7 @@ spec:
   platform: darwin
   description: /etc/security/auditcontrol MUST_ be configured so that it is readable only by the root user and group wheel.
   resolution: /bin/chmod 440 /etc/security/audit_control
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -133,7 +133,7 @@ spec:
   platform: darwin
   description: /etc/security/auditcontrol MUST_ have the owner set to root.
   resolution: /usr/sbin/chown root /etc/security/audit_control
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -154,7 +154,7 @@ spec:
 
     Audit logs contain sensitive data about the system and users. If log files are set to be readable and writable only by system administrators, the risk is mitigated.'
   resolution: /usr/bin/chgrp -R wheel /var/audit/*
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' AND gid = 0;
   purpose: Informational
   tags:
   - compliance
@@ -171,7 +171,7 @@ spec:
   platform: darwin
   description: The audit service MUST be configured to create log files that are readable only by the root user and group wheel. To achieve this, audit log files MUST be configured to mode 440 or less permissive; thereby preventing normal users from reading, modifying or deleting audit logs.
   resolution: /bin/chmod 440 /var/audit/*
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' AND mode <= '440';
   purpose: Informational
   tags:
   - compliance
@@ -192,7 +192,7 @@ spec:
 
     Audit logs contain sensitive data about the system and users. If log files are set to only be readable and writable by system administrators, the risk is mitigated.'
   resolution: /usr/sbin/chown -R root /var/audit/*
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' AND uid = 0;
   purpose: Informational
   tags:
   - compliance
@@ -213,7 +213,7 @@ spec:
 
     Audit records can be generated from various components within the information system (e.g., via a module or policy filter).'
   resolution: /usr/bin/grep -qE "^flags.*[^-]aa" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,aa/' /etc/security/auditcontrol; /usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%aa%';
   purpose: Informational
   tags:
   - compliance
@@ -238,7 +238,7 @@ spec:
 
     NOTE: We recommend changing the line "43127:AUEMACSYSCALL:macsyscall(2):ad" to "43127:AUEMACSYSCALL:macsyscall(2):zz" in the file /etc/security/audit_event. This will prevent sandbox violations from being audited by the ad flag.'
   resolution: /usr/bin/grep -qE "^flags.*[^-]ad" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,ad/' /etc/security/auditcontrol; /usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%ad%';
   purpose: Informational
   tags:
   - compliance
@@ -261,7 +261,7 @@ spec:
 
     Without auditing the enforcement of program execution, it is difficult to identify attempted attacks, as there is no audit trail available for forensic investigation.'
   resolution: /usr/bin/grep -qE "^flags.*-ex" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,-ex/' /etc/security/auditcontrol; /usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%-ex%';
   purpose: Informational
   tags:
   - compliance
@@ -284,7 +284,7 @@ spec:
 
     Without auditing the enforcement of access restrictions, it is difficult to identify attempted attacks, as there is no audit trail available for forensic investigation.'
   resolution: /usr/bin/grep -qE "^flags.*-fm" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,-fm/' /etc/security/auditcontrol;/usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%-fm%';
   purpose: Informational
   tags:
   - compliance
@@ -307,7 +307,7 @@ spec:
 
     Without auditing the enforcement of access restrictions, it is difficult to identify attempted attacks, as there is no audit trail available for forensic investigation.'
   resolution: /usr/bin/grep -qE "^flags.*-fr" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,-fr/' /etc/security/auditcontrol;/usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%-fr%';
   purpose: Informational
   tags:
   - compliance
@@ -330,7 +330,7 @@ spec:
 
     Without auditing the enforcement of access restrictions, it is difficult to identify attempted attacks, as there is no audit trail available for forensic investigation.'
   resolution: /usr/bin/grep -qE "^flags.*-fw" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,-fw/' /etc/security/auditcontrol;/usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%-fw%';
   purpose: Informational
   tags:
   - compliance
@@ -351,7 +351,7 @@ spec:
 
     The information system monitors login and logout events.'
   resolution: /usr/bin/grep -qE "^flags.*[^-]lo" /etc/security/auditcontrol || /usr/bin/sed -i.bak '/^flags/ s/$/,lo/' /etc/security/auditcontrol; /usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/etc/security/auditcontrol' AND content LIKE '%lo%';
   purpose: Informational
   tags:
   - compliance
@@ -372,7 +372,7 @@ spec:
 
     Audit logs contain sensitive data about the system and users. If log files are set to be readable and writable only by system administrators, the risk is mitigated.'
   resolution: /usr/bin/chgrp wheel /var/audit
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/var/audit' AND type = 'directory' AND gid = 0;
   purpose: Informational
   tags:
   - compliance
@@ -393,7 +393,7 @@ spec:
 
     Audit logs contain sensitive data about the system and users. If log folders are set to only be readable and writable by system administrators, the risk is mitigated.'
   resolution: /usr/sbin/chown root /var/audit
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/var/audit' AND type = 'directory' AND uid = 0;
   purpose: Informational
   tags:
   - compliance
@@ -412,7 +412,7 @@ spec:
 
     Because audit logs contain sensitive data about the system and users, the audit service MUST be configured to mode 700 or less permissive; thereby preventing normal users from reading, modifying or deleting audit logs.'
   resolution: /bin/chmod 700 /var/audit
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM file WHERE path = '/var/audit' AND type = 'directory' AND mode <= '700';
   purpose: Informational
   tags:
   - compliance
@@ -431,7 +431,7 @@ spec:
 
     When "expire-after" is set to "$ODV", the audit service will not delete audit logs until the log data criteria is met.'
   resolution: /usr/bin/sed -i.bak 's/^expire-after.*/expire-after:$ODV/' /etc/security/audit_control; /usr/sbin/audit -s
-  query: SELECT 1 FROM file WHERE path LIKE '/var/audit/%' OR path LIKE '/etc/security/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -450,7 +450,7 @@ spec:
 
     Apple''s iCloud service does not provide an organization with enough control over the storage and access of data and, therefore, automated file synchronization MUST be controlled by an organization approved service.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowCloudDesktopAndDocuments' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -469,7 +469,7 @@ spec:
 
     AirDrop allows users to share and receive files from other nearby Apple devices.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowAirDrop' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -492,7 +492,7 @@ spec:
     /bin/launchctl load -w /Library/Apple/System/Library/LaunchDaemons/com.apple.XprotectFramework.PluginService.plist
 
     NOTE: These services cannot be unloaded or loaded while System Integrity Protection (SIP) is enabled.'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -517,7 +517,7 @@ spec:
   resolution: '/usr/bin/csrutil authenticated-root enable
 
     NOTE: To re-enable "Authenticated Root", boot the affected system into "Recovery" mode, launch "Terminal" from the "Utilities" menu, and run the command.'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -534,7 +534,7 @@ spec:
   platform: darwin
   description: Bonjour multicast advertising MUST be disabled to prevent the system from broadcasting its presence and available services over network interfaces.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.mDNSResponder' AND name='NoMulticastAdvertisements' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -557,7 +557,7 @@ spec:
 
     NOTE: Software update will automatically update XProtect Remediator and Gatekeeper by default in the macOS.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SoftwareUpdate' AND name='ConfigDataInstall' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -578,7 +578,7 @@ spec:
 
     Administrator users will still have the option to override these settings on a case-by-case basis.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.systempolicy.control' AND name='EnableAssessment' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -595,7 +595,7 @@ spec:
   platform: darwin
   description: The guest folder MUST be deleted if present.
   resolution: /bin/rm -Rf /Users/Guest
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -622,7 +622,7 @@ spec:
     done
 
     unset IFS'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -643,7 +643,7 @@ spec:
   resolution: '/usr/sbin/apachectl stop 2>/dev/null
 
     /bin/launchctl disable system/org.apache.httpd'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -662,7 +662,7 @@ spec:
   resolution: '/usr/bin/sed -i '''' "s/\ file \/var\/log\/install.log./\* file \/var\/log\/install.log format=''\$\(\(Time\)\(JZ\)\) \$Host \$\(Sender\)\[\$\(PID\\)\]: \$Message'' rotate=utc compress filemax=50M sizeonly ttl=$ODV/g" /etc/asl/com.apple.install
 
     NOTE: If there are multiple configuration files in /etc/asl that are set to process the file /var/log/install.log, these files will have to be manually removed.'
-  query: SELECT 1 FROM file WHERE path LIKE '/etc/%' OR path LIKE '/var/%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -679,7 +679,7 @@ spec:
   platform: darwin
   description: Apple Intelligence features such as Apple Mail Summary that use off device AI MUST be disabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowMailSummary' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -696,7 +696,7 @@ spec:
   platform: darwin
   description: Mobile file integrity MUST be enabled.
   resolution: /usr/sbin/nvram boot-args=""
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -717,7 +717,7 @@ spec:
     /bin/rm -rf /etc/exports
 
     The system may need to be restarted for the update to take effect.'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -734,7 +734,7 @@ spec:
   platform: darwin
   description: Apple Intelligence features such as Notes Transcription that use off device AI MUST be disabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowNotesTranscription' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -751,7 +751,7 @@ spec:
   platform: darwin
   description: Apple Intelligence features such as Notes Transcription Summary that use off device AI MUST be disabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowNotesTranscriptionSummary' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -770,7 +770,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='forceOnDeviceOnlyDictation' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -791,7 +791,7 @@ spec:
     /usr/bin/dscl . -delete /Users/$u hint
 
     done'
-  query: SELECT 1;
+  query: SELECT 1; FROM file WHERE (path LIKE \'/var/audit/%\' OR path LIKE \'/etc/security/%\') AND extended_attributes LIKE \'%com.apple.acl%\';
   purpose: Informational
   tags:
   - compliance
@@ -824,7 +824,7 @@ spec:
     $bannerText
 
     EOF'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -857,7 +857,7 @@ spec:
 
     Mac Pro (Late 2013 and later)'
   resolution: /usr/bin/pmset -a powernap 0
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -876,7 +876,7 @@ spec:
 
     The macOS system MUST require individuals to be authenticated with an individual authenticator prior to using a group authenticator, and administrator users MUST never log in directly as root.'
   resolution: /usr/bin/dscl . -create /Users/root UserShell /usr/bin/false
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -893,7 +893,7 @@ spec:
   platform: darwin
   description: Allow privacy-preserving measurement of ad effectiveness MUST be enabled in Safari.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -910,7 +910,7 @@ spec:
   platform: darwin
   description: Open "safe" files after downloading MUST be disabled in Safari.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -927,7 +927,7 @@ spec:
   platform: darwin
   description: Prevent cross-site tracking MUST be enabled in Safari.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -944,7 +944,7 @@ spec:
   platform: darwin
   description: Show full website address MUST be enabled in Safari.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -961,7 +961,7 @@ spec:
   platform: darwin
   description: Safari MUST be configured to show the status bar.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -978,7 +978,7 @@ spec:
   platform: darwin
   description: Warn when visiting a fraudulent website MUST be enabled in Safari.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1001,7 +1001,7 @@ spec:
   resolution: '/usr/bin/csrutil enable
 
     NOTE: To reenable "System Integrity Protection", boot the affected system into "Recovery" mode, launch "Terminal" from the "Utilities" menu, and run the command.'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1020,7 +1020,7 @@ spec:
   resolution: '/usr/bin/pmset -a sleep 15
 
     /usr/bin/pmset -a displaysleep 10'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1037,7 +1037,7 @@ spec:
   platform: darwin
   description: Software Update MUST be configured to enforce automatic updates of App Updates is enabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SoftwareUpdate' AND name='AutomaticallyInstallAppUpdates' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM software_update WHERE software_update_required = '0';
   purpose: Informational
   tags:
   - compliance
@@ -1054,7 +1054,7 @@ spec:
   platform: darwin
   description: Software updates MUST be deferred for $ODV days or less.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='enforcedSoftwareUpdateDelay' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1073,7 +1073,7 @@ spec:
   resolution: '/usr/bin/find /etc/sudoers -type f -exec sed -i '''' ''/^Defaults[[:blank:]]\!logallowed/s/^/# /'' ''{}'' \;
 
     /bin/echo "Defaults logallowed" >> /etc/sudoers.d/mscp'
-  query: SELECT 1;
+  query: SELECT 1; FROM file WHERE (path LIKE \'/var/audit/%\' OR path LIKE \'/etc/security/%\') AND extended_attributes LIKE \'%com.apple.acl%\';
   purpose: Informational
   tags:
   - compliance
@@ -1092,7 +1092,7 @@ spec:
   resolution: '/usr/bin/find /etc/sudoers* -type f -exec sed -i '''' ''/timestamptimeout/d'' ''{}'' \;
 
     /bin/echo "Defaults timestamptimeout=$ODV" >> /etc/sudoers.d/mscp'
-  query: SELECT 1;
+  query: SELECT 1; FROM file WHERE (path LIKE \'/var/audit/%\' OR path LIKE \'/etc/security/%\') AND extended_attributes LIKE \'%com.apple.acl%\';
   purpose: Informational
   tags:
   - compliance
@@ -1111,7 +1111,7 @@ spec:
 
     This rule ensures that the "sudo" command will prompt for the administrator''s password at least once in each newly opened terminal window. This prevents a malicious user from taking advantage of an unlocked computer or an abandoned logon session by bypassing the normal password prompt requirement.'
   resolution: /usr/bin/find /etc/sudoers* -type f -exec sed -i '' '/timestamptype/d; /!ttytickets/d' '{}' \;
-  query: SELECT 1;
+  query: SELECT 1; FROM file WHERE (path LIKE \'/var/audit/%\' OR path LIKE \'/etc/security/%\') AND extended_attributes LIKE \'%com.apple.acl%\';
   purpose: Informational
   tags:
   - compliance
@@ -1134,7 +1134,7 @@ spec:
     /bin/chmod -R o-w "$apps"
 
     done'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1151,7 +1151,7 @@ spec:
   platform: darwin
   description: Secure keyboard entry MUST be enabled in Terminal.app.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.Terminal' AND name='SecureKeyboardEntry' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1172,7 +1172,7 @@ spec:
   resolution: '/bin/launchctl load -w /System/Library/LaunchDaemons/com.apple.timed.plist
 
     NOTE: The service timed cannot be unloaded or loaded while System Integrity Protection (SIP) is enabled.'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1211,7 +1211,7 @@ spec:
     /usr/bin/security -q authorizationdb write system.login.screensaver "$ODV" 2>&1
 
     fi'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1236,7 +1236,7 @@ spec:
     /bin/chmod -R o-w "$libPermissions"
 
     done'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1259,7 +1259,7 @@ spec:
     /bin/chmod -R o-w "$sysPermissions"
 
     done'
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1276,7 +1276,7 @@ spec:
   platform: darwin
   description: Apple Intelligence features such as writing tools that use off device AI MUST be disabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowWritingTools' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1295,7 +1295,7 @@ spec:
 
     This rule protects against malicious users attempting to gain access to the system via brute-force hacking methods.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1314,7 +1314,7 @@ spec:
 
     This rule protects against malicious users attempting to gain access to the system via brute-force hacking methods.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1335,7 +1335,7 @@ spec:
 
     NOTE: To comply with Executive Order 14028, “Improving the Nation''s Cybersecurity”, OMB M-22-09, “Moving the U.S. Government Toward Zero Trust Cybersecurity Principles”, and NIST SP-800-63b, “Digital Identity Guidelines: Authentication and Lifecycle Management” federal, military, and intelligence communities must adopt the following configuration settings. Password policies must not require the use of complexity policies such as upper characters, lower characters, or special characters. Password policies must also not require the use of regular rotation. Password policies should define a minimum length. Multifactor authentication should be used where ever possible.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1358,7 +1358,7 @@ spec:
 
     NOTE: The configuration profile generated must be installed from an MDM server.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1381,7 +1381,7 @@ spec:
 
     NOTE: The guidance for password based authentication in NIST 800-53 (Rev 5) and NIST 800-63B state that complexity rules should be organizationally defined. The values defined are based off of common complexity values. But your organization may define its own password complexity rules.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1402,7 +1402,7 @@ spec:
 
     NOTE: To comply with Executive Order 14028, “Improving the Nation''s Cybersecurity”, OMB M-22-09, “Moving the U.S. Government Toward Zero Trust Cybersecurity Principles”, and NIST SP-800-63b, “Digital Identity Guidelines: Authentication and Lifecycle Management” federal, military, and intelligence communities must adopt the following configuration settings. Password policies must not require the use of complexity policies such as upper characters, lower characters, or special characters. Password policies must also not require the use of regular rotation. Password policies should define a minimum length. Multifactor authentication should be used where ever possible.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1423,7 +1423,7 @@ spec:
 
     NOTE: To comply with Executive Order 14028, “Improving the Nation''s Cybersecurity”, OMB M-22-09, “Moving the U.S. Government Toward Zero Trust Cybersecurity Principles”, and NIST SP-800-63b, “Digital Identity Guidelines: Authentication and Lifecycle Management” federal, military, and intelligence communities must adopt the following configuration settings. Password policies must not require the use of complexity policies such as upper characters, lower characters, or special characters. Password policies must also not require the use of regular rotation. Password policies should define a minimum length. Multifactor authentication should be used where ever possible.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1446,7 +1446,7 @@ spec:
 
     NOTE: To comply with Executive Order 14028, “Improving the Nation''s Cybersecurity”, OMB M-22-09, “Moving the U.S. Government Toward Zero Trust Cybersecurity Principles”, and NIST SP-800-63b, “Digital Identity Guidelines: Authentication and Lifecycle Management” federal, military, and intelligence communities must adopt the following configuration settings. Password policies must not require the use of complexity policies such as upper characters, lower characters, or special characters. Password policies must also not require the use of regular rotation. Password policies should define a minimum length. Multifactor authentication should be used where ever possible.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1467,7 +1467,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowAirPlayIncomingRequests' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1486,7 +1486,7 @@ spec:
 
     When automatic logons are enabled, the default user account is automatically logged on at boot time without prompting the user for a password. Even if the screen is later locked, a malicious user would be able to reboot the computer and find it already logged in. Disabling automatic logons mitigates this risk.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.loginwindow' AND name='com.apple.login.mcx.DisableAutoLoginClient' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1515,7 +1515,7 @@ spec:
 
     ===='
   resolution: /usr/bin/sudo -u "$CURRENT_USER" /usr/bin/defaults -currentHost write com.apple.Bluetooth PrefKeyServicesEnabled -bool false
-  query: SELECT 1 FROM managed_policies;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1534,7 +1534,7 @@ spec:
 
     Content caching is a macOS service that helps reduce Internet data usage and speed up software installation on Mac computers. It is not recommended for devices furnished to employees to act as a caching server.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowContentCaching' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1551,7 +1551,7 @@ spec:
   platform: darwin
   description: Ensure that security updates are installed as soon as they are available from Apple.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SoftwareUpdate' AND name='CriticalUpdateInstall' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1570,7 +1570,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling the submission of diagnostic and usage information will mitigate the risk of unwanted data being sent to Apple.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SubmitDiagInfo' AND name='AutoSubmit' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1589,7 +1589,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowExternalIntelligenceIntegrations' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1608,7 +1608,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowExternalIntelligenceIntegrationsSignIn' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1629,7 +1629,7 @@ spec:
 
     NOTE: See the FileVault supplemental to implement this rule.'
   resolution: 'NOTE: See the FileVault supplemental to implement this rule.'
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.MCX' AND name='dontAllowFDEDisable' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1648,7 +1648,7 @@ spec:
 
     When the macOS Application Firewall is enabled, the flow of information within the information system and between interconnected systems will be controlled by approved authorizations.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.security.firewall' AND name='EnableFirewall' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1694,7 +1694,7 @@ spec:
 
     Turning off guest access prevents anonymous users from accessing files shared via SMB.'
   resolution: /usr/sbin/sysadminctl -smbGuestAccess off
-  query: SELECT 1 FROM managed_policies;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1713,7 +1713,7 @@ spec:
 
     Turning off guest access prevents anonymous users from accessing files.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.MCX' AND name='DisableGuestAccount' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1748,7 +1748,7 @@ spec:
     /usr/bin/sudo -u "$CURRENTUSER" /usr/bin/defaults delete /Users/"$CURRENTUSER"/Library/Preferences/com.apple.dock wvous-tr-corner 2>/dev/null
 
     /usr/bin/sudo -u "$CURRENTUSER" /usr/bin/defaults delete /Users/"$CURRENTUSER"/Library/Preferences/com.apple.dock wvous-br-corner 2>/dev/null'
-  query: SELECT 1 FROM managed_policies;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1767,7 +1767,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling the submission of this information will mitigate the risk of unwanted data being sent to Apple.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.Accessibility' AND name='AXSAudioDonationSiriImprovementEnabled' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1786,7 +1786,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling the submission of search data will mitigate the risk of unwanted data being sent to Apple.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.assistant.support' AND name='Search Queries Data Sharing Status' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1805,7 +1805,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling the submission of Siri and Dictation information will mitigate the risk of unwanted data being sent to Apple.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.assistant.support' AND name='Siri Data Sharing Opt-In Status' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1822,7 +1822,7 @@ spec:
   platform: darwin
   description: Software Update MUST be configured to enforce automatic installation of macOS updates is enabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SoftwareUpdate' AND name='AutomaticallyInstallMacOSUpdates' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1841,7 +1841,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling Internet sharing helps prevent the unauthorized connection of devices, unauthorized transfer of information, and unauthorized tunneling.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.MCX' AND name='forceInternetSharingOff' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1875,7 +1875,7 @@ spec:
   platform: darwin
   description: Location Services menu item MUST be enabled.
   resolution: /usr/bin/defaults write /Library/Preferences/com.apple.locationmenu.plist ShowSystemServices -bool true
-  query: SELECT 1 FROM managed_policies;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1892,7 +1892,7 @@ spec:
   platform: darwin
   description: The login window MUST be configured to show a custom access warning message.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.loginwindow' AND name='LoginwindowText' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1911,7 +1911,7 @@ spec:
 
     By default, the system displays a list of known users on the login window, which can make it easier for a malicious user to gain access to someone else''s account. Requiring users to type in both their username and password mitigates the risk of unauthorized users gaining access to the information system.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.loginwindow' AND name='SHOWFULLNAME' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1932,7 +1932,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling Media Sharing helps prevent the unauthorized connection of devices and the unauthorized transfer of information. Disabling Media Sharing mitigates this risk.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowMediaSharing' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1951,7 +1951,7 @@ spec:
 
     Password hints leak information about passwords that are currently in use and can lead to loss of confidentiality.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.loginwindow' AND name='RetriesUntilHint' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1970,7 +1970,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities. Disabling ad tracking ensures that applications and advertisers are unable to track users'' interests and deliver targeted advertisements.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowApplePersonalizedAdvertising' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -1989,7 +1989,7 @@ spec:
   resolution: '/usr/sbin/cupsctl --no-share-printers
 
     /usr/bin/lpstat -p | awk ''{print $2}''| /usr/bin/xargs -I{} lpadmin -p {} -o printer-is-shared=false'
-  query: SELECT 1;
+  query: SELECT 1; FROM file WHERE (path LIKE \'/var/audit/%\' OR path LIKE \'/etc/security/%\') AND extended_attributes LIKE \'%com.apple.acl%\';
   purpose: Informational
   tags:
   - compliance
@@ -2012,7 +2012,7 @@ spec:
     /bin/launchctl disable system/com.apple.AEServer
 
     NOTE: Systemsetup with -setremoteappleevents flag will fail unless you grant Full Disk Access to systemsetup or its parent process. Requires supervision.'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2029,7 +2029,7 @@ spec:
   platform: darwin
   description: Remote Management MUST be disabled.
   resolution: /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate -stop
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2052,7 +2052,7 @@ spec:
     /bin/launchctl disable system/com.apple.screensharing
 
     NOTE - This will apply to the whole system'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2071,7 +2071,7 @@ spec:
 
     An unattended system with an excessive grace period is vulnerable to a malicious user.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.screensaver' AND name='askForPasswordDelay' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2109,7 +2109,7 @@ spec:
 
     The information system MUST be configured to provide only essential capabilities.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.applicationaccess' AND name='allowAssistant' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2130,7 +2130,7 @@ spec:
   resolution: '/bin/launchctl disable system/com.apple.smbd
 
     The system may need to be restarted for the update to take effect.'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2147,7 +2147,7 @@ spec:
   platform: darwin
   description: Software Update MUST be configured to enforce automatic downloads of updates is enabled.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.SoftwareUpdate' AND name='AutomaticDownload' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM software_update WHERE software_update_required = '0';
   purpose: Informational
   tags:
   - compliance
@@ -2168,7 +2168,7 @@ spec:
   resolution: '/usr/sbin/softwareupdate -i -a
 
     NOTE - This will apply to the whole system'
-  query: SELECT 1 FROM software_update WHERE software_update_required = '0';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2189,7 +2189,7 @@ spec:
     /bin/launchctl disable system/com.openssh.sshd
 
     NOTE: Systemsetup with -setremotelogin flag will fail unless you grant Full Disk Access to systemsetup or its parent process. Requires supervision.'
-  query: SELECT 1 FROM launchd WHERE name LIKE '%audit%';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2227,7 +2227,7 @@ spec:
   platform: darwin
   description: Automatic backups MUST be enabled when using Time Machine.
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.TimeMachine' AND name='AutoBackup' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2252,7 +2252,7 @@ spec:
     . Click Encrypt Backups
 
     . Click Use Disk'
-  query: SELECT 1 FROM managed_policies;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2271,7 +2271,7 @@ spec:
 
     This rule ensures the uniformity of time stamps for information systems with multiple system clocks and systems connected over a network.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.MCX' AND name='timeServer' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2290,7 +2290,7 @@ spec:
 
     This rule ensures the uniformity of time stamps for information systems with multiple system clocks and systems connected over a network.'
   resolution: This is implemented by a Configuration Profile.
-  query: SELECT 1 WHERE EXISTS (SELECT 1 FROM managed_policies WHERE domain='com.apple.timed' AND name='TMAutomaticTimeOnlyEnabled' AND (value = 1 OR value = 'true'));
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2307,7 +2307,7 @@ spec:
   platform: darwin
   description: Wake for network access MUST be disabled.
   resolution: /usr/bin/pmset -a womp 0
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2326,7 +2326,7 @@ spec:
     2.10.1.1 Ensure the OS Is Not Active When Resuming from Standby (Intel) +\n2.12.2 Audit Touch ID +\n2.14.1 Audit Game Center Settings +\n2.15.1 Audit Notification & Focus Settings +\n2.16.1 Audit Wallet & Apple Pay Settings +\n2.17.1 Audit Internet Accounts for Authorized Use +\n|===\n[cols=\"15%h, 85%a\"]\n|===\n|Section\n|Logging and Auditing\n|Recommendations\n|3.6 Audit Software Inventory\n|===\n[cols=\"15%h, 85%a\"]\n|===\n|Section\n|System Access, Authentication and Authorization\n|Recommendations\n|5.2.3 Ensure Complex Password Must Contain Alphabetic Characters Is Configured +\n5.2.4 Ensure Complex Password Must Contain Numeric Character Is Configured +\n5.2.5 Ensure Complex Password Must Contain Special Character Is Configured +\n5.2.6 Ensure Complex Password Must Contain Uppercase and Lowercase Characters Is Configured +\n5.3.1 Ensure All User Storage APFS Volumes are Encrypted +\n5.3.2 Ensure All User Storage CoreStorage Volumes are Encrypted +\n|===\n[cols=\"15%h, 85%a\"\
     ]\n|===\n|Section\n|Applications\n|Recommendations\n|6.1.1 Ensure Show All Filename Extensions Setting is Enabled +\n6.2.1 Ensure Protect Mail Activity in Mail Is Enabled +\n6.3.2 Audit History and Remove History Items +\n6.3.5 Audit Hide IP Address in Safari Setting +\n6.3.8 Audit Autofill +\n6.3.9 Audit Pop-up Windows +\n6.5.1 Audit Passwords +\n|==="
   resolution: ''
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2396,7 +2396,7 @@ spec:
 
     NOTE: On Intel Macs, FileVault only supports password-based unlock and cannot be done using a smartcard. Smartcard unlock for FileVault is supported on Apple Silicon Macs.'
   resolution: ''
-  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.MCX';
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
@@ -2414,7 +2414,7 @@ spec:
     pwpolicyuppercasecharacterenforce.yaml\nIf an organization has requirements to implement additional password policies, the remainder of this supplemental discusses the following password policy rules:\npwpolicylowercasecharacterenforce\npwpolicyuppercasecharacterenforce\npwpolicyaccountinactivityenforce\npwpolicyminimumlifetimeenforce\nPassword policies should be enforced as much as possible via Configuration Profiles. However, the following policies are currently not enforceable via Configuration Profiles, and must therefore be enabled using the pwpolicy command:\nEnforcing at least 1 lowercase character\nEnforcing at least 1 uppercase character\nDisabling an account after 35 days of inactivity\n* Password minimum lifetime\nTo set the local policy to meet these requirements, save the following XML password policy to a file.\ninclude::../../includes/pwpolicy.xml[]\nRun the following command to load the new policy file, substituting the path to the file in place of \"$pwpolicyfile\".\n\
     /usr/bin/pwpolicy setaccountpolicies $pwpolicy_file\n[NOTE]\n====\nIf directory services is being utilized, password policies should come from the domain.\n====\n[WARNING]\n====\nIn order to apply any password policy, the allowPasscodeModification setting in com.apple.applicationaccess must not be set to false.\n===="
   resolution: ''
-  query: SELECT 1;
+  query: SELECT 1 FROM managed_policies WHERE domain = 'com.apple.applicationaccess';
   purpose: Informational
   tags:
   - compliance
