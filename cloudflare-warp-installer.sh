@@ -53,18 +53,9 @@ if wait_for_user_desktop; then
     # Install WARP
     if installer -pkg "$WARP_PKG_PATH" -target /; then
         rm -f "$WARP_PKG_PATH"
-        # Create a detached cleanup script
-        cat > /tmp/cloudflare-cleanup.sh << 'CLEANUP_EOF'
-#!/bin/bash
-sleep 3
-launchctl bootout system '/Library/LaunchDaemons/com.cloudflare.warp.installer.plist' 2>/dev/null || launchctl unload '/Library/LaunchDaemons/com.cloudflare.warp.installer.plist' 2>/dev/null || true
-rm -f '/Library/LaunchDaemons/com.cloudflare.warp.installer.plist' 2>/dev/null || true
-sleep 2
-rm -f '/usr/local/bin/cloudflare-warp-install.sh' 2>/dev/null || true
-rm -f '/tmp/cloudflare-cleanup.sh' 2>/dev/null || true
-CLEANUP_EOF
-        chmod +x /tmp/cloudflare-cleanup.sh
-        nohup /tmp/cloudflare-cleanup.sh >/dev/null 2>&1 &
+        # Fork cleanup process and exit immediately
+        nohup bash -c "sleep 3; launchctl bootout system '$LAUNCHDAEMON_PLIST' 2>/dev/null || launchctl unload '$LAUNCHDAEMON_PLIST' 2>/dev/null || true; rm -f '$LAUNCHDAEMON_PLIST' 2>/dev/null || true; rm -f '$INSTALL_SCRIPT' 2>/dev/null || true" >/dev/null 2>&1 &
+        exec true
         exit 0
     else
         exit 1
