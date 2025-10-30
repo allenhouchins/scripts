@@ -1,203 +1,82 @@
-# Ubuntu Reboot Manager Setup Instructions
+# Ubuntu Reboot Manager
 
-## Installation Steps
+Enterprise-ready uptime enforcement for Linux desktops/servers. Automatically installs itself persistently, schedules a daily systemd timer, sends user-facing notifications, and performs a forced reboot once uptime exceeds your policy.
 
-### 1. Install Dependencies
-**Note: The script will automatically install zenity if missing, but you can install it manually first:**
+## What it does
+- Installs itself to `/usr/local/sbin/ubuntu-reboot-manager.sh` on first run
+- Installs and enables `reboot-manager.service` + `reboot-manager.timer` (runs daily at 12:00; persistent timer)
+- Logs to `/var/log/reboot-manager.log` and mirrors to STDOUT (MDM-friendly)
+- Notifies active graphical users via `notify-send`; falls back to `wall`
+- Warns at `WARNING_DAYS` and forces reboot at `FORCED_REBOOT_DAYS` with a 5-minute final warning
 
+## Requirements
+- systemd (service + timer)
+- `libnotify-bin` (for `notify-send`) on desktop systems
+
+## Deploy (single command)
 ```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install zenity
+sudo /Users/allen/GitHub/scripts/ubuntu-reboot-manager.sh
+```
+This automatically:
+- Copies the script to `/usr/local/sbin/ubuntu-reboot-manager.sh`
+- Installs/enables the systemd timer
+- Runs the uptime check immediately
 
-# Fedora/RHEL/CentOS
-sudo dnf install zenity
-
-# Arch/Manjaro
-sudo pacman -S zenity
+## Validate installation
+```bash
+systemctl status reboot-manager.timer
+journalctl -u reboot-manager.service --since -5m
+tail -n 50 /var/log/reboot-manager.log
 ```
 
-**Automatic Installation**: If zenity is not found, the script will automatically attempt to install it using the appropriate package manager for your distribution.
+## Testing without waiting
+Simulate days and skip the actual reboot using env overrides and dry-run.
 
-### 2. Create and Install the Script
 ```bash
-# Create the script file
-sudo nano /usr/local/bin/reboot-manager.sh
+# Show warning path (no reboot)
+sudo WARNING_DAYS=5 FORCED_REBOOT_DAYS=7 UPTIME_DAYS=6 /usr/local/sbin/ubuntu-reboot-manager.sh --no-systemd --dry-run
 
-# Copy the script content into the file, then save and exit
-
-# Make the script executable
-sudo chmod +x /usr/local/bin/reboot-manager.sh
-
-# Create log directory (if needed)
-sudo touch /var/log/reboot-manager.log
-sudo chmod 644 /var/log/reboot-manager.log
+# Trigger forced-reboot path safely (dry-run skips shutdown)
+sudo WARNING_DAYS=5 FORCED_REBOOT_DAYS=7 UPTIME_DAYS=8 /usr/local/sbin/ubuntu-reboot-manager.sh --no-systemd --dry-run
 ```
 
-### 3. Set Up Daily Cron Job
+## Options
+- `--status`: Print current uptime, thresholds, timer status, and recent logs
+- `--remove-systemd`: Disable and remove the systemd units
+- `--no-systemd`: Run once without installing or touching systemd
+- `--dry-run`: Exercise logic without scheduling a reboot
+
+## Configuration
+Variables can be overridden at runtime via environment variables or set in the script:
+- `WARNING_DAYS` (default 10)
+- `FORCED_REBOOT_DAYS` (default 14)
+- `LOG_FILE` (default `/var/log/reboot-manager.log`)
+
+## Notifications
+- Primary: `notify-send` via the active user’s systemd user manager (Wayland/X11)
+- Fallbacks: session DBUS with DISPLAY/WAYLAND env, then `wall` to all terminals
+- Ensure `libnotify-bin` is installed on desktops:
 ```bash
-# Edit root's crontab
-sudo crontab -e
-
-# Add this line to run the script daily at 9:00 AM
-0 9 * * * /usr/local/bin/reboot-manager.sh
-
-# Alternative: Run at 2:00 PM
-# 0 14 * * * /usr/local/bin/reboot-manager.sh
+sudo apt-get update && sudo apt-get install -y libnotify-bin
 ```
-
-### 4. Test the Script
-```bash
-# Test script execution
-sudo /usr/local/bin/reboot-manager.sh
-
-# Check the log file
-sudo tail -f /var/log/reboot-manager.log
-
-# Test with a fake high uptime (for testing only)
-# Temporarily modify /proc/uptime or adjust the thresholds in the script
-```
-
-## Configuration Options
-
-You can modify these variables at the top of the script:
-
-- `WARNING_DAYS=10` - Days before showing warning notifications
-- `FORCED_REBOOT_DAYS=14` - Days before forcing automatic reboot
-- `LOG_FILE="/var/log/reboot-manager.log"` - Location of log file
-
-## How It Works
-
-### Timeline:
-- **Days 1-9**: Script runs silently, logs uptime
-- **Days 10-13**: Daily warning notifications to all logged-in users
-- **Day 14+**: Final 5-minute warning, then forced reboot
-
-### Notifications:
-- Uses Zenity for GUI notifications (popup windows)
-- Uses `wall` command for terminal notifications
-- Sends to all active user sessions
-
-### Safety Features:
-- Comprehensive logging to `/var/log/reboot-manager.log`
-- Multiple notification methods (GUI + terminal)
-- 5-minute final warning before forced reboot
-- Log rotation to prevent large files (keeps last 1000 lines)
-- Automatic distribution detection for proper zenity installation instructions
-- Clean exit after scheduling reboot to prevent race conditions
 
 ## Troubleshooting
+- No GUI popup:
+  - Verify a graphical session exists: `loginctl list-sessions`
+  - Check the active session: `loginctl show-session <ID> -p Type -p Display -p Active`
+  - Confirm notify-send availability: `command -v notify-send`
+  - Ensure user systemd is running: `sudo -u '#1000' XDG_RUNTIME_DIR=/run/user/1000 systemctl --user is-system-running`
+- Logs:
+  - `tail -n 100 /var/log/reboot-manager.log`
+  - `journalctl -u reboot-manager.service --since -1h`
 
-### Common Issues:
+## Security
+- Requires root to schedule reboots and reach user sessions
+- Logs contain uptime policy events only; no PII collected
 
-**No notifications appearing:**
-- Verify zenity is installed: `which zenity` (script will auto-install if missing)
-- Check if users have DISPLAY environment variable set
-- Ensure script is running as root
-- Check log file for zenity installation messages
-
-**Script not running:**
-- Check cron service: `sudo systemctl status cron`
-- Verify crontab entry: `sudo crontab -l`
-- Check script permissions: `ls -la /usr/local/bin/reboot-manager.sh`
-
-**Testing notifications:**
-- Log in as a regular user with GUI session
-- Run script manually: `sudo /usr/local/bin/reboot-manager.sh`
-- Check log file for errors
-
-### Log File Monitoring:
+## Uninstall
 ```bash
-# Watch log in real-time
-sudo tail -f /var/log/reboot-manager.log
-
-# View recent entries
-sudo tail -20 /var/log/reboot-manager.log
-
-# Search for specific events
-sudo grep "WARNING" /var/log/reboot-manager.log
-sudo grep "FORCED REBOOT" /var/log/reboot-manager.log
-```
-
-### Distribution-Specific Considerations
-
-**Fedora/RHEL/CentOS Additional Steps:**
-```bash
-# If SELinux is enforcing, you may need to allow the script to run
-# Check SELinux status
-getenforce
-
-# If needed, create SELinux policy or set permissive mode for testing
-# sudo setenforce 0  # Temporary - for testing only
-# For production, create proper SELinux policy
-
-# Fedora uses 'crond' instead of 'cron'
-sudo systemctl enable crond
-sudo systemctl start crond
-```
-
-**Ubuntu/Debian Additional Notes:**
-- AppArmor is generally permissive for this use case
-- Standard cron service should work out of the box
-- Zenity typically pre-installed on desktop versions
-
-**Arch/Manjaro Additional Steps:**
-```bash
-# Install zenity
-sudo pacman -S zenity
-
-# Enable and start cronie (Arch uses cronie instead of cron)
-sudo systemctl enable cronie
-sudo systemctl start cronie
-```
-
-## Security Considerations
-
-- Script must run as root (required for reboot and cross-user notifications)
-- Log file contains system uptime information
-- **SELinux systems**: May require custom policy for cross-user GUI access
-- **Firewall**: No network access required
-- **Script integrity**: The script includes automatic distribution detection and proper error handling
-- Test thoroughly before deploying to production systems
-
-## Script Features
-
-### Automatic Distribution Detection & Package Installation
-The script automatically detects your Linux distribution and:
-- **Auto-installs zenity** if missing using the appropriate package manager:
-  - Ubuntu/Debian (apt-get)
-  - Fedora/RHEL/CentOS (dnf/yum)
-  - Arch/Manjaro (pacman)
-- **Falls back gracefully** for unknown distributions with manual installation instructions
-
-### Error Handling
-- Graceful handling of missing zenity package
-- Proper exit codes for different failure scenarios
-- Comprehensive logging of all operations
-- Clean shutdown after scheduling reboot
-
-## Customization Examples
-
-### Change notification timing:
-```bash
-# Show warnings earlier (day 7) and force reboot later (day 21)
-WARNING_DAYS=7
-FORCED_REBOOT_DAYS=21
-```
-
-### Different cron schedules:
-```bash
-# Run twice daily (9 AM and 6 PM)
-0 9,18 * * * /usr/local/bin/reboot-manager.sh
-
-# Run only on weekdays
-0 9 * * 1-5 /usr/local/bin/reboot-manager.sh
-```
-
-### Email notifications (addition):
-Add this function to the script for email alerts:
-```bash
-send_email_alert() {
-    echo "System uptime: $UPTIME_DAYS days" | mail -s "Reboot Alert" admin@company.com
-}
+sudo /usr/local/sbin/ubuntu-reboot-manager.sh --remove-systemd
+sudo rm -f /usr/local/sbin/ubuntu-reboot-manager.sh
+sudo rm -f /var/log/reboot-manager.log
 ```
