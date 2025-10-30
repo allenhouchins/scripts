@@ -2,7 +2,7 @@
 
 # Ubuntu Reboot Management Script
 # Purpose: Monitor system uptime and enforce periodic reboots
-# Requirements: systemd (service + timer), optional notify-send for GUI notifications
+# Requirements: systemd (service + timer)
 # Default: On first run, auto-install to /usr/local/sbin and install/enable systemd timer
 
 # Configuration (env-overridable for testing)
