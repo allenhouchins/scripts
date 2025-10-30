@@ -2,22 +2,31 @@
 
 # Ubuntu Reboot Management Script
 # Purpose: Monitor system uptime and enforce periodic reboots
-# Requirements: Zenity for GUI notifications
-# Usage: Run as daily cron job
+# Requirements: systemd (service + timer), optional notify-send for GUI notifications
+# Default: On first run, auto-install to /usr/local/sbin and install/enable systemd timer
 
-# Configuration
-WARNING_DAYS=10
-FORCED_REBOOT_DAYS=14
+# Configuration (env-overridable for testing)
+WARNING_DAYS=${WARNING_DAYS:-10}
+FORCED_REBOOT_DAYS=${FORCED_REBOOT_DAYS:-14}
 LOG_FILE="/var/log/reboot-manager.log"
 SCRIPT_NAME="Reboot Manager"
+## STDOUT mirroring is always enabled (MDM-friendly)
 
 # Function to log messages
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+	local line
+	line="$(date '+%Y-%m-%d %H:%M:%S') - $1"
+	echo "$line" >> "$LOG_FILE"
+    echo "$line"
 }
 
 # Function to get uptime in days
 get_uptime_days() {
+    # Allow test override via env: UPTIME_DAYS=<int>
+    if [ -n "${UPTIME_DAYS:-}" ]; then
+        echo "$UPTIME_DAYS"
+        return 0
+    fi
     local uptime_seconds
     uptime_seconds=$(awk '{print int($1)}' /proc/uptime)
     echo $((uptime_seconds / 86400))
@@ -37,89 +46,114 @@ detect_distro() {
     fi
 }
 
-# Function to install zenity automatically
-install_zenity() {
-    local distro
-    distro=$(detect_distro)
-    
-    log_message "Attempting to install zenity on $distro system"
-    
-    case "$distro" in
-        ubuntu|debian)
-            if command -v apt-get &> /dev/null; then
-                apt-get update -qq && apt-get install -y zenity
-                if [ $? -eq 0 ]; then
-                    log_message "Successfully installed zenity via apt-get"
-                    return 0
-                fi
-            fi
-            ;;
-        fedora|rhel|centos)
-            if command -v dnf &> /dev/null; then
-                dnf install -y zenity
-                if [ $? -eq 0 ]; then
-                    log_message "Successfully installed zenity via dnf"
-                    return 0
-                fi
-            elif command -v yum &> /dev/null; then
-                yum install -y zenity
-                if [ $? -eq 0 ]; then
-                    log_message "Successfully installed zenity via yum"
-                    return 0
-                fi
-            fi
-            ;;
-        arch|manjaro)
-            if command -v pacman &> /dev/null; then
-                pacman -Sy --noconfirm zenity
-                if [ $? -eq 0 ]; then
-                    log_message "Successfully installed zenity via pacman"
-                    return 0
-                fi
-            fi
-            ;;
-        *)
-            log_message "ERROR: Unknown distribution '$distro' - cannot auto-install zenity"
-            return 1
-            ;;
-    esac
-    
-    log_message "ERROR: Failed to install zenity on $distro system"
-    return 1
-}
+# (zenity auto-install removed; using notify-send with wall fallback)
 
-# Function to send notification to all logged-in users
+# Function to send notification to all logged-in user sessions
 send_notification() {
     local title="$1"
     local message="$2"
-    local icon="$3"
-    local timeout="$4"
-    
-    # Get all active user sessions
-    local users
-    users=$(who | awk '{print $1}' | sort -u)
-    
-    if [ -z "$users" ]; then
-        log_message "No users logged in for notification"
-        return 1
+    local urgency="$3" # low|normal|critical
+
+    # Require libnotify/notify-send
+    if ! command -v notify-send >/dev/null 2>&1; then
+        wall "NOTIFICATION: $message"
+        log_message "notify-send not found; sent wall notification"
+        return 0
     fi
-    
-    # Send notification to each logged-in user
-    for user in $users; do
-        # Try GUI notification first (simplified approach)
-        if sudo -u "$user" zenity --notification --text="$message" --timeout="$timeout" 2>/dev/null; then
-            log_message "GUI notification sent to user: $user"
-            
-            # Also show a dialog for important messages
-            if [ "$icon" = "warning" ] || [ "$icon" = "error" ]; then
-                sudo -u "$user" zenity --"$icon" --title="$title" --text="$message" --width=400 --timeout=30 2>/dev/null &
-            fi
+
+    # Optional: allow admin to force a specific user via TARGET_USER or TARGET_UID
+    if [ -n "${TARGET_USER:-}" ] || [ -n "${TARGET_UID:-}" ]; then
+        local uid
+        if [ -n "${TARGET_UID:-}" ]; then
+            uid="$TARGET_UID"
         else
-            # Fall back to wall message for users without GUI
-            wall "NOTIFICATION: $message"
-            log_message "Wall message sent to user: $user (no GUI available)"
+            uid=$(id -u "$TARGET_USER" 2>/dev/null || true)
         fi
-    done
+        if [ -n "$uid" ]; then
+            # Try Wayland then X11
+            local env_try1="XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus WAYLAND_DISPLAY=wayland-0"
+            local env_try2="XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus DISPLAY=:0"
+            if eval sudo -u "#$uid" $env_try1 notify-send --urgency="${urgency:-normal}" "$title" "$message" 2>/dev/null; then
+                log_message "GUI notification sent to TARGET_UID=$uid via Wayland"
+                return 0
+            fi
+            if eval sudo -u "#$uid" $env_try2 notify-send --urgency="${urgency:-normal}" "$title" "$message" 2>/dev/null; then
+                log_message "GUI notification sent to TARGET_UID=$uid via X11"
+                return 0
+            fi
+            log_message "Failed TARGET_USER/TARGET_UID notification attempts; will try session discovery"
+        fi
+    fi
+
+    # Enumerate sessions and target only active graphical sessions
+    local sent_any=0
+    while read -r sid uid; do
+        [ -z "$sid" ] && continue
+        # Query session properties
+        local stype sactive sdisplay
+        stype=$(loginctl show-session "$sid" -p Type 2>/dev/null | awk -F= '{print $2}')
+        sactive=$(loginctl show-session "$sid" -p Active 2>/dev/null | awk -F= '{print $2}')
+        sdisplay=$(loginctl show-session "$sid" -p Display 2>/dev/null | awk -F= '{print $2}')
+
+        # Only X11/Wayland and active sessions
+        if [ "$sactive" != "yes" ]; then
+            continue
+        fi
+        if [ "$stype" != "x11" ] && [ "$stype" != "wayland" ]; then
+            continue
+        fi
+
+        # Preferred: execute via the user's systemd user manager (auto-wires DBUS)
+        if sudo -u "#$uid" XDG_RUNTIME_DIR="/run/user/$uid" systemd-run --user --collect \
+            --unit "reboot-notify-$(date +%s%N)" notify-send --urgency="${urgency:-normal}" "$title" "$message" 2>/dev/null; then
+            sent_any=1
+        else
+            # Fallback: build environment for the user's session bus and display
+            local env_cmd="XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus"
+            if [ "$stype" = "x11" ]; then
+                if [ -n "$sdisplay" ]; then
+                    env_cmd="$env_cmd DISPLAY=$sdisplay"
+                elif [ -e /tmp/.X11-unix/X0 ]; then
+                    env_cmd="$env_cmd DISPLAY=:0"
+                fi
+            else
+                if [ -e "/run/user/$uid/wayland-0" ]; then
+                    env_cmd="$env_cmd WAYLAND_DISPLAY=wayland-0"
+                fi
+            fi
+            if eval sudo -u "#$uid" $env_cmd notify-send --urgency="${urgency:-normal}" "$title" "$message" 2>/dev/null; then
+                sent_any=1
+            fi
+        fi
+    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1, $2}')
+
+    if [ "$sent_any" = "1" ]; then
+        log_message "GUI notifications sent via notify-send to active graphical sessions"
+    else
+        # Fallback 2: attempt to discover GUI env from common desktop processes
+        for candidate in gnome-shell gnome-session-binary plasmashell startplasma-x11 startplasma-wayland xfce4-session cinnamon-session mate-session sway; do
+            pid=$(pgrep -u 1000 -n "$candidate" 2>/dev/null || true)
+            if [ -n "$pid" ]; then
+                uid=$(awk '/Uid:/{print $2}' "/proc/$pid/status" 2>/dev/null)
+                if [ -n "$uid" ]; then
+                    # Extract env from the GUI process
+                    gui_env=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -E '^(DISPLAY=|WAYLAND_DISPLAY=|DBUS_SESSION_BUS_ADDRESS=|XDG_RUNTIME_DIR=)')
+                    if [ -n "$gui_env" ]; then
+                        if eval sudo -u "#$uid" env $gui_env notify-send --urgency="${urgency:-normal}" "$title" "$message" 2>/dev/null; then
+                            sent_any=1
+                            log_message "GUI notification sent using environment from process $candidate (pid $pid)"
+                            break
+                        fi
+                    fi
+                fi
+            fi
+        done
+
+        if [ "$sent_any" != "1" ]; then
+            wall "NOTIFICATION: $message"
+            log_message "Fell back to wall notification (no eligible GUI sessions or notify-send failure)"
+        fi
+    fi
 }
 
 # Function to show countdown notification
@@ -128,7 +162,7 @@ show_countdown_notification() {
     local title="System Reboot Required"
     local message="Your system has been running for $UPTIME_DAYS days.\nA reboot is required in $days_left day(s).\n\nPlease save your work and reboot when convenient."
     
-    send_notification "$title" "$message" "warning" 0
+    send_notification "$title" "$message" "normal"
 }
 
 # Function to show final warning
@@ -136,7 +170,7 @@ show_final_warning() {
     local title="URGENT: Immediate Reboot Required"
     local message="Your system has been running for $UPTIME_DAYS days.\n\nSystem will automatically reboot in 5 minutes!\n\nPlease save all work immediately!"
     
-    send_notification "$title" "$message" "error" 0
+    send_notification "$title" "$message" "critical"
     
     # Show wall message to all terminals
     wall "URGENT: System will reboot in 5 minutes due to uptime policy ($UPTIME_DAYS days). Save your work now!"
@@ -152,8 +186,12 @@ perform_forced_reboot() {
     # Give users a moment to see the message
     sleep 5
     
-    # Schedule immediate reboot
-    shutdown -r +1 "Automated reboot: System uptime exceeded $FORCED_REBOOT_DAYS days policy"
+    # Schedule immediate reboot (skip when DRY_RUN=1)
+    if [ "${DRY_RUN:-0}" = "1" ]; then
+        log_message "DRY_RUN enabled - skipping shutdown command"
+    else
+        shutdown -r +1 "Automated reboot: System uptime exceeded $FORCED_REBOOT_DAYS days policy"
+    fi
     
     log_message "Reboot scheduled - system will restart in 1 minute"
     
@@ -161,47 +199,95 @@ perform_forced_reboot() {
     exit 0
 }
 
-# Function to install cron job
-install_cron_job() {
-    local script_path="$1"
-    local cron_entry="0 12 * * * $script_path"
-    
-    log_message "Installing cron job: $cron_entry"
-    
-    # Check if cron job already exists in root crontab
-    if crontab -l 2>/dev/null | grep -q "$script_path"; then
-        log_message "Cron job already exists for this script"
-        return 0
-    fi
-    
-    # Add cron job to root crontab
-    (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
-    
-    if [ $? -eq 0 ]; then
-        log_message "Cron job installed successfully"
-        return 0
-    else
-        log_message "ERROR: Failed to install cron job"
-        return 1
-    fi
+## systemd installation helpers
+
+# Ensure the script is installed to a persistent path (not /tmp)
+ensure_persistent_install() {
+	local current_path
+	current_path=$(realpath "$0")
+	local target_path="/usr/local/sbin/ubuntu-reboot-manager.sh"
+
+	# If current path is already the target and executable, return it
+	if [ "$current_path" = "$target_path" ] && [ -x "$current_path" ]; then
+		echo "$target_path"
+		return 0
+	fi
+
+	# If current path is under /tmp or not persistent, copy to target_path
+	if echo "$current_path" | grep -qE '^/tmp/'; then
+		log_message "Detected transient script location ($current_path); installing to $target_path"
+	else
+		log_message "Installing script to persistent location: $target_path"
+	fi
+
+	install -m 0755 "$current_path" "$target_path" 2>/dev/null || cp "$current_path" "$target_path"
+	chmod 0755 "$target_path" 2>/dev/null
+	if command -v chown >/dev/null 2>&1; then
+		chown root:root "$target_path" 2>/dev/null || true
+	fi
+
+	if [ -x "$target_path" ]; then
+		log_message "Persistent install complete at $target_path"
+		echo "$target_path"
+		return 0
+	else
+		log_message "ERROR: Failed to install script to $target_path"
+		echo "$current_path"
+		return 1
+	fi
 }
 
-# Function to remove cron job
-remove_cron_job() {
-    local script_path="$1"
-    
-    log_message "Removing cron job for: $script_path"
-    
-    # Remove cron job from root crontab
-    crontab -l 2>/dev/null | grep -v "$script_path" | crontab -
-    
-    if [ $? -eq 0 ]; then
-        log_message "Cron job removed successfully"
-        return 0
-    else
-        log_message "ERROR: Failed to remove cron job"
-        return 1
-    fi
+install_systemd_units() {
+    local target_path
+    target_path="$(ensure_persistent_install)"
+    local service="/etc/systemd/system/reboot-manager.service"
+    local timer="/etc/systemd/system/reboot-manager.timer"
+
+    log_message "Installing systemd units ($service, $timer)"
+
+    cat > "$service" <<'EOF'
+[Unit]
+Description=Reboot Manager - uptime policy enforcement
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ubuntu-reboot-manager.sh --no-systemd
+Nice=10
+CapabilityBoundingSet=CAP_SYS_BOOT
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat > "$timer" <<'EOF'
+[Unit]
+Description=Run Reboot Manager daily at 12:00
+
+[Timer]
+OnCalendar=*-*-* 12:00:00
+Persistent=true
+Unit=reboot-manager.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload 2>/dev/null
+    systemctl enable --now reboot-manager.timer 2>/dev/null && log_message "systemd timer enabled and started" || log_message "ERROR: failed to enable/start systemd timer"
+}
+
+remove_systemd_units() {
+    local service="/etc/systemd/system/reboot-manager.service"
+    local timer="/etc/systemd/system/reboot-manager.timer"
+    log_message "Removing systemd units"
+    systemctl disable --now reboot-manager.timer 2>/dev/null || true
+    rm -f "$timer" "$service"
+    systemctl daemon-reload 2>/dev/null
+    log_message "Systemd units removed"
 }
 
 # Function to show usage
@@ -209,14 +295,15 @@ show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --install-cron    Install daily cron job (runs at 12 noon)"
-    echo "  --remove-cron     Remove cron job"
-    echo "  --no-cron         Run without installing cron job"
+    echo "  --install-systemd Install systemd service+timer (daily at 12:00)"
+    echo "  --remove-systemd  Remove systemd units"
+    echo "  --no-systemd      Run without touching systemd"
+    echo "  --dry-run         Exercise logic without actually scheduling a reboot"
     echo "  --status          Show current status and uptime"
     echo "  --help            Show this help message"
     echo ""
-    echo "Default behavior: Runs uptime check, notifications, and auto-installs cron job if missing."
-    echo "Use --no-cron to run without cron installation."
+    echo "Default behavior: Installs to /usr/local/sbin, installs/enables systemd timer,"
+    echo "and runs checks while logging to $LOG_FILE and mirroring to STDOUT."
 }
 
 # Function to show status
@@ -231,11 +318,11 @@ show_status() {
     echo "Log file: $LOG_FILE"
     echo ""
     
-    # Check if cron job exists in root crontab
-    if crontab -l 2>/dev/null | grep -q "$(realpath "$0")"; then
-        echo "Cron job: INSTALLED"
+    # Check systemd timer status
+    if systemctl is-enabled reboot-manager.timer >/dev/null 2>&1; then
+        echo "systemd timer: INSTALLED"
     else
-        echo "Cron job: NOT INSTALLED"
+        echo "systemd timer: NOT INSTALLED"
     fi
     
     # Show recent log entries
@@ -251,20 +338,20 @@ log_message "Script started"
 
 # Handle command line arguments
 case "${1:-}" in
-    --install-cron)
+    --install-systemd)
         if [ "$EUID" -ne 0 ]; then
             echo "Error: This option must be run as root"
             exit 1
         fi
-        install_cron_job "$(realpath "$0")"
+        install_systemd_units
         exit $?
         ;;
-    --remove-cron)
+    --remove-systemd)
         if [ "$EUID" -ne 0 ]; then
             echo "Error: This option must be run as root"
             exit 1
         fi
-        remove_cron_job "$(realpath "$0")"
+        remove_systemd_units
         exit $?
         ;;
     --status)
@@ -275,12 +362,16 @@ case "${1:-}" in
         show_usage
         exit 0
         ;;
-    --no-cron)
-        # Run without installing cron job
-        log_message "Running without cron installation (--no-cron flag)"
+    --no-systemd)
+        # Run without touching systemd
+        log_message "Running without systemd changes (--no-systemd flag)"
+        ;;
+    --dry-run)
+        DRY_RUN=1
+        log_message "Dry-run mode enabled (no actual shutdown)"
         ;;
     "")
-        # No arguments - run normal uptime check and install cron if needed
+        # No arguments - proceed with normal execution
         ;;
     *)
         echo "Error: Unknown option '$1'"
@@ -296,48 +387,20 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Auto-install cron job if not already installed (unless --no-cron flag is used)
-if [ "${1:-}" != "--no-cron" ]; then
-    if ! crontab -l 2>/dev/null | grep -q "$(realpath "$0")"; then
-        log_message "Cron job not found - installing automatically"
-        if install_cron_job "$(realpath "$0")"; then
-            log_message "Cron job installed successfully - script will run daily at 12 noon"
-        else
-            log_message "WARNING: Failed to install cron job - script will not run automatically"
-        fi
+# Auto-install to persistent path and ensure systemd timer is installed/enabled unless --no-systemd was used
+if [ "${1:-}" != "--no-systemd" ]; then
+    PERSISTENT_PATH="$(ensure_persistent_install)"
+    if ! systemctl is-enabled reboot-manager.timer >/dev/null 2>&1; then
+        log_message "systemd timer not found - installing automatically"
+        install_systemd_units
     else
-        log_message "Cron job already installed - continuing with uptime check"
+        log_message "systemd timer already installed - continuing with uptime check"
     fi
 fi
 
-# Check if zenity is installed and auto-install if missing
-if ! command -v zenity &> /dev/null; then
-    log_message "Zenity not found - attempting automatic installation"
-    
-    if install_zenity; then
-        log_message "Zenity successfully installed - continuing script execution"
-    else
-        local distro
-        distro=$(detect_distro)
-        echo "Error: Failed to automatically install zenity on $distro system"
-        echo "Please install zenity manually:"
-        case "$distro" in
-            ubuntu|debian)
-                echo "  apt-get install zenity"
-                ;;
-            fedora|rhel|centos)
-                echo "  dnf install zenity"
-                ;;
-            arch|manjaro)
-                echo "  pacman -S zenity"
-                ;;
-            *)
-                echo "  Install zenity package for your distribution"
-                ;;
-        esac
-        log_message "ERROR: Failed to install zenity - script cannot continue"
-        exit 1
-    fi
+# Prefer notify-send; continue without it (fallback to wall)
+if ! command -v notify-send >/dev/null 2>&1; then
+    log_message "notify-send not found; GUI notifications may be unavailable (falling back to wall)"
 fi
 
 # Get current uptime in days
