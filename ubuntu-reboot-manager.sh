@@ -10,7 +10,7 @@ WARNING_DAYS=${WARNING_DAYS:-10}
 FORCED_REBOOT_DAYS=${FORCED_REBOOT_DAYS:-14}
 LOG_FILE="/var/log/reboot-manager.log"
 SCRIPT_NAME="Reboot Manager"
-## STDOUT mirroring is always enabled (MDM-friendly)
+
 
 # Function to log messages
 log_message() {
@@ -46,7 +46,36 @@ detect_distro() {
     fi
 }
 
-# (zenity auto-install removed; using notify-send with wall fallback)
+# Auto-install notify-send (libnotify) when missing
+install_notify_send() {
+	local distro
+	distro=$(detect_distro)
+
+	case "$distro" in
+		ubuntu|debian)
+			if command -v apt-get >/dev/null 2>&1; then
+				apt-get update -qq && apt-get install -y -qq libnotify-bin && return 0
+			fi
+			;;
+		fedora|rhel|centos)
+			if command -v dnf >/dev/null 2>&1; then
+				dnf install -y -q libnotify && return 0
+			elif command -v yum >/dev/null 2>&1; then
+				yum install -y -q libnotify && return 0
+			fi
+			;;
+		arch|manjaro)
+			if command -v pacman >/dev/null 2>&1; then
+				pacman -Sy --noconfirm libnotify && return 0
+			fi
+			;;
+		*)
+			return 1
+			;;
+	esac
+
+	return 1
+}
 
 # Function to send notification to all logged-in user sessions
 send_notification() {
@@ -400,7 +429,12 @@ fi
 
 # Prefer notify-send; continue without it (fallback to wall)
 if ! command -v notify-send >/dev/null 2>&1; then
-    log_message "notify-send not found; GUI notifications may be unavailable (falling back to wall)"
+	log_message "notify-send not found - attempting automatic installation"
+	if install_notify_send && command -v notify-send >/dev/null 2>&1; then
+		log_message "notify-send installed successfully"
+	else
+		log_message "WARNING: Failed to install notify-send; GUI notifications may be unavailable (falling back to wall)"
+	fi
 fi
 
 # Get current uptime in days
